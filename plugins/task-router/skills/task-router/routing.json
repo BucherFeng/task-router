@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "defaults": {
+    "primary": "glm-5.3-flash"
+  },
+  "models": {
+    "glm-5.3-flash": {
+      "family": "glm",
+      "tier": "fast",
+      "strengths": ["conversation", "planning", "review"],
+      "context_window": "1m"
+    },
+    "glm-5.3": {
+      "family": "glm",
+      "tier": "flagship",
+      "strengths": ["coding", "agents", "long-horizon", "long-context"],
+      "context_window": "1m"
+    }
+  },
+  "routes": {
+    "discussion": { "delegate": false },
+    "planning": { "delegate": false },
+    "review": { "delegate": false },
+    "small-edit": { "delegate": false },
+    "edit": { "delegate": true, "model": "glm-5.3" },
+    "bulk-rewrite": { "delegate": true, "model": "glm-5.3" },
+    "long-context": { "delegate": true, "model": "glm-5.3" },
+    "deep-analysis": { "delegate": true, "model": "glm-5.3" }
+  },
+  "fallback": { "delegate": false },
+  "failover": {
+    "on_status": [429, 502, 503],
+    "cooldown_seconds": 300,
+    "chains": {
+      "glm-5.3-flash": ["glm-5.3"],
+      "glm-5.3": ["glm-5.3-flash"]
+    }
+  }
+}

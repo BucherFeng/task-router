@@ -1,0 +1,3 @@
+interface:
+  display_name: "Task Router"
+  short_description: "Config-driven task routing: classify the task, resolve the target model from routing.json, delegate when appropriate"

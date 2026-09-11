@@ -1,0 +1,52 @@
+# task-router
+
+Codex 任务路由插件：讨论、方案、review 留在主线程模型；代码修改、长上下文
+分析等任务自动委托给指定模型（当前配置为 GLM 系列）。
+
+## 安装
+
+克隆本仓库后运行一条命令：
+
+```bash
+git clone <本仓库地址> && cd task-router-repo && ./install.sh
+```
+
+安装脚本会自动完成三件事：把插件复制到 `~/plugins/task-router/`、把插件条
+目合并进你的个人 marketplace（已存在则替换同名条目，不影响其他插件）、执
+行 `codex plugin add task-router@personal`。完成后**新开一个 Codex 线程**
+即可生效。
+
+不想用 Git 的话，把整个仓库打成 zip 发给对方，解压后同样执行
+`./install.sh` 即可。
+
+## 前提
+
+- 本机装有 Codex CLI。
+- 你的 `/model` 目录里存在 `routing.json` 引用的模型 id（当前为
+  `glm-5.3-flash` 和 `glm-5.3`）。如果模型 id 不同，编辑
+  `plugins/task-router/skills/task-router/routing.json`：把 `models` 目录和
+  `routes` 里的 id 换成你环境里的实际 id 即可，规则写法见
+  `plugins/task-router/skills/task-router/references/routing-schema.md`。
+- 插件本身不包含 API 地址和密钥，需要你自己的 provider 配置可用。
+
+## 备用安装方式（不合并个人 marketplace）
+
+也可以把本仓库注册为独立 marketplace：
+
+```bash
+codex plugin marketplace add <本仓库路径>/.agents/plugins/marketplace.json
+codex plugin add task-router@fengbochao-plugins
+```
+
+## 维护者升级流程
+
+1. 修改工作目录 `~/plugins/task-router/`（本地测试用）。
+2. 同步进仓库并提交：
+
+   ```bash
+   cp -R ~/plugins/task-router/. ~/task-router-repo/plugins/task-router/
+   cd ~/task-router-repo && git commit -am "update task-router"
+   git push
+   ```
+
+3. 接收方拉取最新仓库后重新运行 `./install.sh` 即可更新。

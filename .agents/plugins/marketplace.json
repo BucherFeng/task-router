@@ -1,0 +1,20 @@
+{
+  "name": "fengbochao-plugins",
+  "interface": {
+    "displayName": "Fengbochao Plugins"
+  },
+  "plugins": [
+    {
+      "name": "task-router",
+      "source": {
+        "source": "local",
+        "path": "./plugins/task-router"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

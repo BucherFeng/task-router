@@ -1,0 +1,21 @@
+{
+  "name": "task-router",
+  "version": "0.2.0+codex.20260911084141",
+  "description": "Config-driven task routing across model families with deterministic resolution",
+  "author": {
+    "name": "fengbochao"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Task Router",
+    "shortDescription": "Discussion stays primary, code edits delegate to GLM-5.3",
+    "longDescription": "Installs the task-router skill: planning and discussion stay on the primary model, while concrete file modifications are delegated to a glm-5.3 sub-agent with full codebase context and a review step before integration.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "\u7528 task-router \u5904\u7406\u8fd9\u4e2a\u4ee3\u7801\u4fee\u6539\u4efb\u52a1",
+      "\u8ba8\u8bba\u65b9\u6848\uff0c\u7136\u540e\u628a\u7ed3\u8bba\u6d3e\u7ed9 GLM-5.3 \u6267\u884c"
+    ]
+  }
+}
