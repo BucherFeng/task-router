@@ -9,23 +9,34 @@ Routing decisions come from `routing.json` in this skill directory. Never
 hardcode model ids in your reasoning; resolve them with the helper script so
 config changes take effect immediately.
 
+The host thread is a dispatcher, not a participant: classify each request,
+resolve the route, and delegate substantive work. The host model answers
+trivial exchanges inline and absorbs delegated work itself only after a whole
+failover chain is exhausted.
+
 ## Classify the task
 
 Map the request to one of these types:
 
-- `discussion`: questions, explanations, clarification, architecture talk.
-- `planning`: designing an approach or breaking work into steps.
-- `review`: examining code for issues with no edits requested.
+- `trivial`: short acknowledgments, yes/no replies, one-line follow-ups with
+  no new substance.
+- `discussion`: questions, explanations, clarification, architecture talk;
+  routed to the GPT-family model.
+- `planning`: designing an approach or breaking work into steps; GPT-family.
+- `review`: examining code for issues with no edits requested; GPT-family.
 - `small-edit`: mechanical change, roughly under 10 lines in 1-2 files.
-- `edit`: concrete code modification (feature, bugfix, refactor, tests).
-- `bulk-rewrite`: mechanical identical transformation across many files.
+- `edit`: concrete code modification (feature, bugfix, refactor, tests);
+  GLM-family.
+- `bulk-rewrite`: mechanical identical transformation across many files;
+  GLM-family.
 - `long-context`: analysis that requires reading large documents or a large
-  portion of the codebase.
+  portion of the codebase; GLM-family.
 - `deep-analysis`: hard reasoning over a complex problem where model depth
-  matters more than speed.
+  matters more than speed; GPT-family.
 
-If the request mixes discussion with edits, handle the discussion part in the
-primary thread, then route the edit part separately.
+If the request mixes discussion with edits, resolve and route each part
+separately: the discussion part through its own route, the edit part through
+its own.
 
 ## Resolve the route
 
@@ -44,7 +55,8 @@ JSON line:
 
 - `delegate: true`: spawn a sub-agent with `model: "<model>"` (see below).
 - `delegate: false`: handle the task in the current thread; `model` is
-  informational and the thread keeps its own model.
+  informational and the thread keeps its own model. Inline handling applies to
+  `trivial`, `small-edit`, and to any task whose failover chain was exhausted.
 - `fallback: true`: the task type was unknown; the safe default is to stay in
   the current thread and note the unmatched type in your final answer.
 

@@ -1,7 +1,9 @@
 # task-router
 
-Codex 任务路由插件：讨论、方案、review 留在主线程模型；代码修改、长上下文
-分析等任务自动委托给指定模型（当前配置为 GLM 系列）。
+Codex 调度员式任务路由插件：主线程模型只做分类和派发。讨论、方案、review
+委托给 GPT 系模型；写代码、批量改写、长上下文分析委托给 GLM 系模型；琐碎
+交互由主线程直接回答。每个模型配有降级链（例如 gpt-6 不可用时依次尝试
+gpt-5.6 → gpt-5.5 → glm-5.3），额度耗尽或服务 503 时自动切换。
 
 ## 安装
 
@@ -22,8 +24,12 @@ git clone <本仓库地址> && cd task-router-repo && ./install.sh
 ## 前提
 
 - 本机装有 Codex CLI。
-- 你的 `/model` 目录里存在 `routing.json` 引用的模型 id（当前为
-  `glm-5.3-flash` 和 `glm-5.3`）。如果模型 id 不同，编辑
+- `routing.json` 中的 GPT 模型 id（`gpt-5.5`/`gpt-5.6`/`gpt-6`）目前是占
+  位 id。请把它们和 `routes`、`failover.chains` 里的引用换成你环境里
+  `/model` 中的实际 id。替换前，讨论类任务会因 GPT 不可用沿降级链自动落
+  到 GLM 上，功能不受影响。
+- GLM 模型 id 为 `glm-5.3-flash`（主线程）和 `glm-5.3`（编码委托）。如果
+  模型 id 不同，编辑
   `plugins/task-router/skills/task-router/routing.json`：把 `models` 目录和
   `routes` 里的 id 换成你环境里的实际 id 即可，规则写法见
   `plugins/task-router/skills/task-router/references/routing-schema.md`。

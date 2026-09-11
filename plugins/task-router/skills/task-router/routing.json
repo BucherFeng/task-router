@@ -15,17 +15,36 @@
       "tier": "flagship",
       "strengths": ["coding", "agents", "long-horizon", "long-context"],
       "context_window": "1m"
+    },
+    "gpt-5.5": {
+      "family": "gpt",
+      "tier": "standard",
+      "strengths": ["discussion", "planning", "reasoning"],
+      "context_window": "400k"
+    },
+    "gpt-5.6": {
+      "family": "gpt",
+      "tier": "advanced",
+      "strengths": ["discussion", "planning", "review", "reasoning"],
+      "context_window": "400k"
+    },
+    "gpt-6": {
+      "family": "gpt",
+      "tier": "flagship",
+      "strengths": ["discussion", "planning", "review", "deep-reasoning"],
+      "context_window": "1m"
     }
   },
   "routes": {
-    "discussion": { "delegate": false },
-    "planning": { "delegate": false },
-    "review": { "delegate": false },
+    "trivial": { "delegate": false },
+    "discussion": { "delegate": true, "model": "gpt-6" },
+    "planning": { "delegate": true, "model": "gpt-6" },
+    "review": { "delegate": true, "model": "gpt-6" },
     "small-edit": { "delegate": false },
     "edit": { "delegate": true, "model": "glm-5.3" },
     "bulk-rewrite": { "delegate": true, "model": "glm-5.3" },
     "long-context": { "delegate": true, "model": "glm-5.3" },
-    "deep-analysis": { "delegate": true, "model": "glm-5.3" }
+    "deep-analysis": { "delegate": true, "model": "gpt-6" }
   },
   "fallback": { "delegate": false },
   "failover": {
@@ -33,7 +52,10 @@
     "cooldown_seconds": 300,
     "chains": {
       "glm-5.3-flash": ["glm-5.3"],
-      "glm-5.3": ["glm-5.3-flash"]
+      "glm-5.3": ["glm-5.3-flash"],
+      "gpt-6": ["gpt-5.6", "gpt-5.5", "glm-5.3"],
+      "gpt-5.6": ["gpt-6", "gpt-5.5", "glm-5.3"],
+      "gpt-5.5": ["gpt-6", "gpt-5.6", "glm-5.3"]
     }
   }
 }

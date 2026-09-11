@@ -1,16 +1,16 @@
 {
   "name": "task-router",
-  "version": "0.2.0+codex.20260911084141",
-  "description": "Config-driven task routing across model families with deterministic resolution",
+  "version": "0.3.0",
+  "description": "Dispatcher-style task routing: discussion to GPT-family, code tasks to GLM-family, trivial inline, with per-model failover chains",
   "author": {
     "name": "fengbochao"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Task Router",
-    "shortDescription": "Discussion stays primary, code edits delegate to GLM-5.3",
-    "longDescription": "Installs the task-router skill: planning and discussion stay on the primary model, while concrete file modifications are delegated to a glm-5.3 sub-agent with full codebase context and a review step before integration.",
-    "developerName": "Local developer",
+    "shortDescription": "Dispatcher routing: discussion to GPT, code to GLM, trivial inline",
+    "longDescription": "Installs the task-router skill: the host thread acts as a pure dispatcher, delegating discussion and planning to GPT-family models, code modifications and long-context analysis to GLM-family models, and keeping trivial exchanges inline. Routing targets and failover chains are config-driven via routing.json.",
+    "developerName": "fengbochao",
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": [
