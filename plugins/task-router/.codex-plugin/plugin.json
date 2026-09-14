@@ -1,15 +1,16 @@
 {
   "name": "task-router",
-  "version": "0.4.0+codex.20260914084349",
-  "description": "Configurable model pools with strict validation, migration, compatibility checks and routing explanations",
+  "version": "0.5.0+codex.20260914115844",
+  "description": "Managed model routing from Codex conversation with background execution and durable task status",
   "author": {
     "name": "fengbochao"
   },
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Task Router",
-    "shortDescription": "Route tasks through configurable model pools",
-    "longDescription": "Uses a dispatcher skill and deterministic role-based model selection. Supports persistent user configuration, v1 migration, compatibility diagnostics and per-candidate explanations. Delegation and bounded retry are performed by the host agent; this plugin does not intercept API requests or recover a failed host model.",
+    "shortDescription": "Submit, track and resume model tasks in Codex",
+    "longDescription": "Adds conversation tools for submitting authorized tasks, waiting for results, cancellation and recovery. A packaged background controller persists tasks and manages model attempts. The host classifies and submits requests; this does not recover a host model that fails before submission.",
     "developerName": "fengbochao",
     "category": "Productivity",
     "capabilities": [],

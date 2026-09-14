@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "task-router": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "-B",
+        "-c",
+        "import json, os, pathlib, re, runpy, subprocess, tomllib\nhome = pathlib.Path.home()\ncodex_home = pathlib.Path(os.environ.get(\"CODEX_HOME\") or home / \".codex\")\nnames = []\nsettings = codex_home / \"config.toml\"\nif settings.is_file():\n    with settings.open(\"rb\") as stream:\n        config = tomllib.load(stream)\n    for key, value in config.get(\"plugins\", {}).items():\n        if key.startswith(\"task-router@\") and isinstance(value, dict) and value.get(\"enabled\", True):\n            names.append(key.split(\"@\", 1)[1])\nif not names:\n    personal = home / \".agents/plugins/marketplace.json\"\n    if personal.is_file():\n        name = json.loads(personal.read_text()).get(\"name\")\n        if isinstance(name, str):\n            names.append(name)\n    names.append(\"fengbochao-plugins\")\nif os.environ.get(\"TASK_ROUTER_MARKETPLACE\"):\n    names = [os.environ[\"TASK_ROUTER_MARKETPLACE\"]]\nplugins = {}\nfor name in dict.fromkeys(names):\n    if not re.fullmatch(r\"[A-Za-z0-9_-]+\", name):\n        raise RuntimeError(\"Invalid Task Router marketplace name.\")\n    result = subprocess.run([\"codex\", \"plugin\", \"list\", \"--marketplace\", name, \"--json\"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)\n    if result.returncode:\n        continue\n    for plugin in json.loads(result.stdout).get(\"installed\", []):\n        if plugin.get(\"name\") == \"task-router\" and plugin.get(\"enabled\", True):\n            plugins[(plugin.get(\"marketplaceName\"), plugin.get(\"version\"))] = plugin\nif len(plugins) != 1:\n    raise RuntimeError(\"Task Router needs one enabled installation; check the Codex plugin panel.\")\nplugin = next(iter(plugins.values()))\nparts = [plugin.get(\"marketplaceName\"), plugin.get(\"name\"), plugin.get(\"version\")]\nif any(not isinstance(p, str) or not re.fullmatch(r\"[A-Za-z0-9_.+-]+\", p) or p in (\".\", \"..\") for p in parts):\n    raise RuntimeError(\"Invalid Task Router installation metadata.\")\ncache = codex_home / \"plugins/cache\"\nentry = cache.joinpath(*parts, \"scripts\", \"bootstrap_mcp.py\")\nif not entry.is_file() or not entry.resolve().is_relative_to(cache.resolve()):\n    raise RuntimeError(\"Task Router runtime is missing from the installed plugin; reinstall it in Codex.\")\nrunpy.run_path(str(entry), run_name=\"__main__\")\n"
+      ],
+      "env_vars": [
+        "SUB2API_API_KEY",
+        "OPENAI_API_KEY",
+        "TASK_ROUTER_CONFIG",
+        "TASK_ROUTER_STATE_DIR",
+        "TASK_ROUTER_WORKER",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "XDG_DATA_HOME",
+        "CODEX_HOME",
+        "TASK_ROUTER_MARKETPLACE"
+      ],
+      "startup_timeout_sec": 180,
+      "tool_timeout_sec": 40
+    }
+  }
+}

@@ -1,5 +1,5 @@
 interface:
   display_name: "Task Router"
-  short_description: "Route discussion and coding through model pools"
+  short_description: "Manage routed tasks directly from Codex conversation"
 policy:
   allow_implicit_invocation: true

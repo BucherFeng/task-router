@@ -1,0 +1,84 @@
+{
+  "version": "0.5.0+codex.20260914115844",
+  "date": "2026-09-14",
+  "automated_tests": 96,
+  "native_discovery": {
+    "name": "task-router",
+    "pluginId": "task-router@personal",
+    "runtimeStatus": "connected",
+    "toolsError": null,
+    "tools": [
+      "task_wait",
+      "router_diagnose",
+      "task_cancel",
+      "task_submit",
+      "task_resume",
+      "task_status"
+    ]
+  },
+  "conversation": {
+    "turn_status": "completed",
+    "tools_used": [
+      {
+        "server": "task-router",
+        "tool": "task_submit",
+        "status": "completed"
+      },
+      {
+        "server": "task-router",
+        "tool": "task_wait",
+        "status": "completed"
+      },
+      {
+        "server": "task-router",
+        "tool": "task_wait",
+        "status": "completed"
+      },
+      {
+        "server": "task-router",
+        "tool": "task_wait",
+        "status": "completed"
+      }
+    ],
+    "artifact_correct": true
+  },
+  "managed_tasks": [
+    {
+      "task_id": "0ad7b0d1-e5c2-4879-83f7-74782c19398b",
+      "status": "succeeded",
+      "changed_files": [
+        "hello.txt"
+      ],
+      "attempts": [
+        {
+          "number": 1,
+          "model": "glm-5.3-flash",
+          "effort": "low",
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "task_id": "c2d32655-c638-432e-a32a-d51e1a3bec34",
+      "status": "succeeded",
+      "changed_files": [
+        "chat-hello.txt"
+      ],
+      "attempts": [
+        {
+          "number": 1,
+          "model": "glm-5.3-flash",
+          "effort": "low",
+          "status": "succeeded"
+        }
+      ]
+    }
+  ],
+  "configuration_preserved": true,
+  "notes": [
+    "The natural-language test used an isolated Codex app-server with unrelated apps disabled, not the user's global settings.",
+    "The test client accepted the Codex approval for the already-authorized fixture task; no approval policy was bypassed.",
+    "MCP tasks did not execute an arbitrary host verification command; fixture content was independently inspected by the harness.",
+    "First-run SDK download was not exercised because mcp 1.27.0 was already installed."
+  ]
+}

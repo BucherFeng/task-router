@@ -23,7 +23,20 @@ from typing import Any
 PLUGIN_NAME = "task-router"
 EXPECTED_MARKETPLACE_NAME = "fengbochao-plugins"
 EXPECTED_SOURCE_PATH = "./plugins/task-router"
-REQUIRED_VERSION = "0.4.0"
+REQUIRED_VERSION = "0.5.0"
+MCP_CONFIG_DEFAULT = "./.mcp.json"
+MCP_REQUIRED_PATHS = (
+    "scripts/bootstrap_mcp.py",
+    "scripts/mcp_server.py",
+    "scripts/background_worker.py",
+    "scripts/run_task.py",
+    "scripts/task_router_runtime/cli.py",
+    "scripts/task_router_runtime/service.py",
+    "scripts/task_router_runtime/controller.py",
+    "scripts/task_router_runtime/store.py",
+    "scripts/task_router_runtime/codex_adapter.py",
+    "scripts/task_router_runtime/__init__.py",
+)
 
 
 class InstallError(Exception):
@@ -152,11 +165,27 @@ def validate_source(repo: Path) -> tuple[Path, Path, Path]:
         raise InstallError("source plugin manifest is missing its skills path")
     if not (plugin / "skills" / PLUGIN_NAME / "SKILL.md").is_file():
         raise InstallError("source plugin is missing SKILL.md")
+    validate_source_mcp(plugin, manifest)
 
     bundled_config = load_json(bundled, "source bundled routing config")
     detect_config_version(bundled_config, str(bundled))
     validate_router_config(router, bundled, "source bundled routing config")
     return marketplace_path, plugin, router
+
+
+def validate_source_mcp(plugin: Path, manifest: dict[str, Any]) -> None:
+    configured = manifest.get("mcpServers")
+    if configured is None:
+        return
+    if configured != MCP_CONFIG_DEFAULT:
+        raise InstallError(
+            f"source plugin mcpServers path must be {MCP_CONFIG_DEFAULT!r}; found {configured!r}"
+        )
+    companion = plugin / ".mcp.json"
+    load_json(companion, "source MCP companion config")
+    for relative in MCP_REQUIRED_PATHS:
+        if not (plugin / relative).is_file():
+            raise InstallError(f"source plugin is missing MCP runtime file: {plugin / relative}")
 
 
 def detect_config_version(config: dict[str, Any], path: Path | str) -> int:

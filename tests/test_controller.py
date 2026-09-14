@@ -232,6 +232,12 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["result"]["error_kind"], "scope_violation")
 
+    def test_readonly_parent_directory_ignores_controller_bookkeeping(self):
+        task = self.submit(writable=False, cwd=str(self.directory.parent))
+        result = Controller(self.store, Adapter([outcome("succeeded")]), choose).execute(task)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["result"]["changed_files"], [])
+
     def test_unavailable_candidate_pool_does_not_start_process(self):
         policy = config()
         for profile in policy["profiles"].values():

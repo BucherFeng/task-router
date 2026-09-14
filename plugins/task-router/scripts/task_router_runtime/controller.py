@@ -11,13 +11,21 @@ from pathlib import Path
 from .store import StateError, process_present
 
 
-def snapshot(cwd):
+def snapshot(cwd, ignored_roots=()):
     files = {}
     byte_budget = 32 * 1024 * 1024
     incomplete = False
     skipped = {".git", ".venv", "venv", "node_modules", "__pycache__"}
+    ignored = [Path(path).resolve() for path in ignored_roots]
+
+    def excluded(path):
+        return any(path == root or root in path.parents for root in ignored)
+
     for root, directories, names in os.walk(cwd, followlinks=False):
-        directories[:] = sorted(name for name in directories if name not in skipped and not Path(root, name).is_symlink())
+        if excluded(Path(root)):
+            directories[:] = []
+            continue
+        directories[:] = sorted(name for name in directories if name not in skipped and not Path(root, name).is_symlink() and not excluded(Path(root, name)))
         for name in sorted(names):
             path = Path(root, name)
             relative = str(path.relative_to(cwd))
@@ -188,7 +196,9 @@ class Controller:
                     self.store.set_status(task_id, "failed", selected["reason"], task["result"])
                     return self.report(task_id)
                 cwd = payload["cwd"]
-                current = snapshot(cwd)
+                # Host bookkeeping can live under a broad read-only cwd; it is not a worker edit.
+                ignored_roots = (self.store.directory, Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex"))
+                current = snapshot(cwd, ignored_roots)
                 prompt = self._prompt(task, attempts, current)
                 try:
                     number, deadline = self.store.start_attempt(task_id, selected["model"], selected["reasoning_effort"], current)
@@ -214,7 +224,7 @@ class Controller:
                     if not verification["passed"]:
                         result.update(status="failed", error_kind="verification", retryable=False,
                                       message="Explicit verification did not pass.", quiescent=verification["quiescent"])
-                after = snapshot(cwd)
+                after = snapshot(cwd, ignored_roots)
                 result["changed_files"] = changes(current, after)
                 if not payload["writable"] and result["changed_files"]:
                     result.update(status="failed", error_kind="scope_violation", retryable=False,

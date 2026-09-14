@@ -141,6 +141,10 @@ class Store:
             self.db.execute("UPDATE tasks SET status=?,message=?,result=?,updated=? WHERE id=?",
                             (status, message, json.dumps(result) if result is not None else None, time.time(), task_id))
 
+    def note(self, task_id, message):
+        with self.db:
+            self.db.execute("UPDATE tasks SET message=?,updated=? WHERE id=?", (message, time.time(), task_id))
+
     def start_attempt(self, task_id, model, effort, before_files):
         with self.db:
             task = self.task(task_id)

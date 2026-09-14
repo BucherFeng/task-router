@@ -89,7 +89,8 @@ class CodexAdapter:
         try:
             process = subprocess.Popen([self.executable, "app-server", "--stdio", "-c", "features.multi_agent=false"],
                                        cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
+                                       stderr=subprocess.PIPE, bufsize=0, start_new_session=True,
+                                       env={**os.environ, "TASK_ROUTER_WORKER": "1"})
         except OSError as exc:
             return outcome("failed", "configuration", f"Cannot start Codex ({type(exc).__name__}).")
         selector = selectors.DefaultSelector()

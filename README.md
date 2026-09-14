@@ -1,115 +1,101 @@
 # task-router
 
-Codex 多模型任务路由插件，当前版本 v0.4.0。
+Codex 多模型任务管理插件，当前版本 v0.5.0。
 
-新增独立命令行执行原型：可先保存任务，再调用模型，并在确认执行结束后选择
-备用模型续做。入口为 `python3 scripts/run_task.py`，详见
-[原型使用与恢复边界](docs/controller-prototype.md)。它尚未集成进已安装插件。
+安装并启用后，可以直接在 Codex 对话中提交任务、查看进度、取消和恢复，
+无需用户打开终端运行脚本。模型分工和候选顺序由个人配置控制。
 
-主 agent 按任务选择角色，Python 解析器从角色的候选模型池中选择目标，再由主
-agent 发起委托。默认偏好 GPT 处理讨论、方案与 review，GLM 处理代码阅读、
-修改和测试。模型分工可配置，主模型不会被插件自动切换。
+## 在对话中使用
 
-## 安装或升级
+首次安装或升级后，新开一个 Codex 对话，让新版 skill 和工具加载。可以直接说：
 
-需要 Python 3.11+ 和支持 plugin 命令的 Codex CLI。安装器适用于 Linux/macOS
-和 WSL；本轮在 Linux 验证。已有可用的 API/provider 配置由使用者自行提供。
+- “用 task-router 分析这个项目的架构，先不要改代码。”
+- “用 task-router 修复这个函数，并运行相关测试。”
+- “刚才的任务做到哪了？”
+- “取消刚才的任务。”
+- “继续之前保存的任务。”
 
-克隆到任意目录后，在仓库内执行：
+Codex 负责理解任务类型和项目目录，并调用插件工具。用户不需要填写内部
+task_type、任务编号或终端命令。首次调用有副作用的工具时，Codex 可能在界面
+请求授权，可在界面确认；插件不会绕过这一步。
 
-~~~bash
-./install.sh
-~~~
+提交成功不代表任务完成，前台会通过等待/查询工具取得最终结果。已提交的
+任务由独立后台进程执行，前台工具连接关闭后也能继续保存结果。
 
-也可下载完整仓库压缩包，解压后运行 bash install.sh。
+## 内置工具
 
-- 已有本插件的个人 marketplace 安装：检查原来源，暂存新插件，备份旧版本，
-  再调用 Codex 安装命令。不会手工修改已有 marketplace。
-- 新使用者：通过 Codex CLI 注册这个仓库为独立 marketplace，然后安装
-  task-router@fengbochao-plugins。请保留仓库所在路径，用于后续更新。
-- 用户配置独立保存在 ~/.config/task-router/routing.json，支持 XDG_CONFIG_HOME。
-  已有有效 v2 配置保持原样；v1 配置备份后迁移。外部配置不存在时会迁移旧
-  插件目录的配置，新安装才使用包内默认配置。
-- 升级失败会尝试恢复配置及旧插件目录，并报告保留文件的位置。Codex 自身的
-  注册/缓存状态不是文件系统事务的一部分；首次注册成功而安装失败时，可能
-  留下 marketplace 条目，需要根据错误提示核对。
-- 同时只允许一个安装过程。不修改密钥、主模型或其他插件配置。
+| 工具 | 作用 |
+|---|---|
+| task_submit | 保存并启动任务，返回编号 |
+| task_status | 查询任务、列出最近任务、分页读取长结果 |
+| task_wait | 有界等待进度或完成结果 |
+| task_cancel | 请求取消，之后确认最终状态 |
+| task_resume | 继续可恢复任务；成功任务不重复执行 |
+| router_diagnose | 检查配置来源、模型分工和可用性证据 |
 
-成功后开一个新 Codex 线程加载新版 skill。解析器每次读取外部配置，之后调整
-角色池无需重装；修改 skill 或 Python 脚本则需要重装。若设置了
-TASK_ROUTER_CONFIG，安装器会提示显式处理这份配置，避免迁移到错误位置。
+这些工具由 Codex 自动启动的 MCP 服务提供，后台控制器和路由解析器都在插件包内。
+不依赖源码仓库位于作者机器上的路径，也不需要用户手动启动服务。
 
-## 使用与配置
+## 默认模型分工
 
-显式要求“用 task-router 处理”可以加载工作流；也允许模型自动选择此 skill。
-skill 是模型遵循的指令，不能保证每次对话都强制路由。
+| 工作 | 默认首选 |
+|---|---|
+| 普通讨论 | gpt-5.5 |
+| 方案规划、深度分析 | gpt-6-astra |
+| 代码审查 | gpt-5.5 |
+| 编码、重构、测试 | glm-5.3 |
+| 读代码、机械小改 | glm-5.3-flash |
 
-从本仓库运行诊断或查看选择：
+每个角色可以有多个候选。默认策略是讨论优先 GPT、编码优先 GLM；这些是可配置
+偏好，不是性能排名，也不是每个使用者都有相同模型权限的保证。
 
-~~~bash
-python3 plugins/task-router/skills/task-router/scripts/route.py --doctor
-python3 plugins/task-router/skills/task-router/scripts/route.py --task edit --explain
-python3 plugins/task-router/skills/task-router/scripts/route.py --list
-~~~
+个人配置位于 ~/.config/task-router/routing.json，支持 XDG_CONFIG_HOME。
+升级保留已有有效配置；旧配置备份后迁移。模型名或排序改变，只需调整个人
+配置，也可以让 Codex 帮助修改。字段见
+[配置参考](plugins/task-router/skills/task-router/references/routing-schema.md)。
 
-所有结果包含实际配置路径、来源和摘要。退出码 0 表示成功或诊断报告生成；
-2 表示输入/配置错误；3 表示没有可用候选或尝试次数达到上限。
-doctor 返回 attention 时应查看 notes，即使命令退出码为 0。
+## 安装与环境
 
-配置分三层：
+在 Codex 插件界面安装并启用 task-router；已有使用者升级后新开对话。
+分享时使用插件界面的分享入口。维护者保留安装脚本和开发 CLI，日常使用者
+无需通过它们提交任务。
 
-1. tasks 把任务映射到角色。
-2. roles 列出有序的 profile 候选。
-3. profiles 定义实际 model_id、是否启用及 reasoning_effort。
+环境需要 Python 3.11+、可用的 Codex CLI，以及自己的 API/provider 配置。
+CLI 由插件在后台调用。缺少 MCP SDK 时，启动器自动尝试准备私有环境并安装
+固定版本 SDK，不修改全局 Python；首次准备依赖需要网络，失败会显示启动错误。
 
-例如把 discussion-main 的 model_id 改成其他型号，所有引用它的角色都会
-使用新型号，无须修改 skill。迁移旧配置会保留旧分工；采用新版默认分工应先
-生成单独的候选文件并比较，不通过升级静默覆盖。
+插件不包含 API 密钥。默认转发已存在的 SUB2API_API_KEY、OPENAI_API_KEY 等变量；
+其他凭据变量需要相应配置转发，不能把密钥写入分享包。
 
-详细字段与迁移命令见
-[配置文档](plugins/task-router/skills/task-router/references/routing-schema.md)。
+本轮验证针对 Linux、codex-cli 0.154.0。启动器根据已启用插件的 marketplace
+信息定位安装缓存，不使用固定机器路径。多个同名安装会明确报错，避免运行
+错误副本。其他系统和 CLI 版本仍需实际验证。
 
-## 默认分工
+## 恢复边界
 
-| 任务 | 角色 | 首选候选 |
-|---|---|---|
-| 普通讨论 | discussion | gpt-5.4 |
-| 复杂方案、深度分析 | reasoning | gpt-6-astra |
-| 代码审查 | review | gpt-5.5 |
-| 编码、重构、测试 | coding | glm-5.3 |
-| 读代码、机械小改 | coding-light | glm-5.3-flash |
-| 无后续工作的简短回应 | 本地处理 | 当前主模型 |
+后台程序保存任务并管理候选、尝试次数和时间预算。对确认结束的可重试服务
+故障选择下一候选。取消请求、超时或断线不自动等于旧执行已经停止。
 
-这些是默认配置偏好，不是模型效果排名或可用性保证。目录之外的新模型不会
-自动启用。当前主模型实际型号、认证方式和子 agent 可调用的型号需在使用者
-自己的环境核实。配置中的 dispatcher.model_id 只是期望值。
+不明确的执行会标为 unknown，阻止盲目重放；可恢复检查点保留工作区占用。
+成功任务再次恢复只返回结果，不重新执行。
 
-## 能力与边界
+MCP 入口不接受任意主机验证命令，依赖 worker 在受限环境中的验证报告和前台
+审查。completion_verified=false 不应被误报为独立程序验证通过。开发 CLI
+保留使用者明确指定验证命令的能力。
 
-v0.4 实现严格配置校验、v1 迁移、角色池、推理参数筛选、可选上下文/工具能力
-检查、路由解释和安装备份恢复。支持宿主传入当前会话的能力快照、已失败模型
-和尝试次数；模型目录仅作为声明，不能证明余额或实际连通性。
+主模型必须先提交任务。如果它在提交之前就失效，后台没有收到这条请求，
+无法恢复它。插件没有拦截所有 API 请求，也不能保证主模型每次都选择此
+skill；明确说“用 task-router”可以确定工作流意图。
 
-子任务失败后由主 agent 查询下一候选并重试。max_attempts 的检查依赖主
-agent 传入真实次数；没有后台重试执行器、持久化冷却、余额监控或自动
-HTTP 故障拦截。超时后先确认旧 worker 停止并检查已有改动，再决定是否续做。
+尚未实现余额监控或持久化模型冷却。全部候选不可用时明确停止，认证错误、
+额度不足和服务 503 不能一概视为同一种故障。
 
-主模型自身不可用时，插件无法执行恢复逻辑。未知候选、认证错误和限流应
-如实报告，不能把固定回复或查表成功当作全链路通过。
+## 开发与验证资料
 
-本机真实验证结果及未通过项见 [v0.4 验证记录](docs/v0.4-validation.md)。
+- [v0.5 对话入口验证](docs/v0.5-validation.md)
+- [独立控制器及开发 CLI](docs/controller-prototype.md)
+- [候选模型验证](docs/model-check-20260914.md)
+- [后续调度设计](docs/controller-design.md)
 
-## 维护与测试
-
-发布仓库是唯一维护源；~/plugins/task-router 和 Codex 插件缓存是安装产物。
-不要通过修改缓存维护代码。日常更新仓库后重新运行安装脚本；发布时维护真实
-版本号，开发迭代按 plugin-creator 的 cachebuster 流程重装。
-
-~~~bash
-python3 -B -m unittest discover -s tests -v
-bash -n install.sh
-~~~
-
-测试覆盖无效配置、筛选、迁移、安装保留、并发安装拒绝和模拟 Codex 安装
-失败恢复；使用临时目录和假的 Codex 命令，不访问真实账户或修改其配置。
-后续任务状态与故障恢复设计见 [升级方案](docs/upgrade-plan.md)。
+仓库是唯一维护源，安装目录和缓存是派生产物。旧开发脚本保留兼容入口，
+真正的运行代码位于 plugins/task-router/scripts/，插件可以独立分发。

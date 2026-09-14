@@ -28,7 +28,7 @@ V2 = {
 
 SOURCE_MANIFEST = {
     "name": PLUGIN,
-    "version": "0.4.0",
+    "version": "0.5.0",
     "skills": "./skills/",
 }
 
@@ -141,6 +141,30 @@ class InstallerTests(unittest.TestCase):
         codex.write_text(FAKE_CODEX, encoding="utf-8")
         codex.chmod(0o755)
 
+    def enable_source_mcp(self) -> Path:
+        plugin = self.source / "plugins" / PLUGIN
+        manifest = dict(SOURCE_MANIFEST)
+        manifest["mcpServers"] = "./.mcp.json"
+        self.write_json(plugin / ".codex-plugin" / "plugin.json", manifest)
+        companion = plugin / ".mcp.json"
+        self.write_json(companion, {"mcpServers": {"task-router": {}}})
+        for relative in (
+            "scripts/bootstrap_mcp.py",
+            "scripts/mcp_server.py",
+            "scripts/background_worker.py",
+            "scripts/run_task.py",
+            "scripts/task_router_runtime/cli.py",
+            "scripts/task_router_runtime/service.py",
+            "scripts/task_router_runtime/controller.py",
+            "scripts/task_router_runtime/store.py",
+            "scripts/task_router_runtime/codex_adapter.py",
+            "scripts/task_router_runtime/__init__.py",
+        ):
+            path = plugin / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# fixture MCP runtime\n", encoding="utf-8")
+        return companion
+
     def write_json(self, path: Path, value: dict) -> None:
         path.write_text(json.dumps(value), encoding="utf-8")
 
@@ -230,10 +254,74 @@ class InstallerTests(unittest.TestCase):
         manifest = json.loads(
             (self.home / "plugins" / PLUGIN / ".codex-plugin" / "plugin.json").read_text()
         )
-        self.assertTrue(manifest["version"].startswith("0.4.0+codex."))
+        self.assertTrue(manifest["version"].startswith("0.5.0+codex."))
         backups = list((self.home / "plugins/.task-router-backups").glob("task-router.backup.*"))
         self.assertEqual(len(backups), 1)
         self.assertIn("version", json.loads(backups[0].joinpath("skills", PLUGIN, "routing.json").read_text()))
+
+    def test_mcp_source_requires_valid_companion(self) -> None:
+        companion = self.enable_source_mcp()
+        companion.write_text("{not json", encoding="utf-8")
+        self.personal_home()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot read valid JSON from source MCP companion config", result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_mcp_source_requires_companion(self) -> None:
+        companion = self.enable_source_mcp()
+        companion.unlink()
+        self.personal_home()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("source MCP companion config not found", result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_mcp_source_requires_default_companion_reference(self) -> None:
+        self.enable_source_mcp()
+        plugin = self.source / "plugins" / PLUGIN
+        manifest = json.loads((plugin / ".codex-plugin" / "plugin.json").read_text())
+        manifest["mcpServers"] = "./mcp/custom.json"
+        self.write_json(plugin / ".codex-plugin" / "plugin.json", manifest)
+        self.personal_home()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("mcpServers path must be './.mcp.json'", result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_mcp_source_requires_runtime(self) -> None:
+        self.enable_source_mcp()
+        plugin = self.source / "plugins" / PLUGIN
+        runtime = [
+            plugin / "scripts" / "bootstrap_mcp.py",
+            plugin / "scripts" / "mcp_server.py",
+            plugin / "scripts" / "run_task.py",
+            plugin / "scripts" / "task_router_runtime" / "cli.py",
+            plugin / "scripts" / "task_router_runtime" / "controller.py",
+            plugin / "scripts" / "task_router_runtime" / "store.py",
+            plugin / "scripts" / "task_router_runtime" / "codex_adapter.py",
+            plugin / "scripts" / "task_router_runtime" / "__init__.py",
+        ]
+        for path in runtime:
+            with self.subTest(path=path.relative_to(plugin)):
+                original = path.read_text(encoding="utf-8")
+                path.unlink()
+                result = self.run_installer()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("source plugin is missing MCP runtime file", result.stderr)
+                path.write_text(original, encoding="utf-8")
+
+    def test_copied_plugin_alone_does_not_need_mcp_files(self) -> None:
+        self.personal_home()
+        destination = self.home / "plugins" / PLUGIN
+        (destination / ".codex-plugin").mkdir(parents=True)
+        self.write_json(
+            destination / ".codex-plugin" / "plugin.json",
+            {**SOURCE_MANIFEST, "mcpServers": "./.mcp.json"},
+        )
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(destination.joinpath("skills", PLUGIN, "routing.json").is_file())
 
     def test_update_preserves_existing_v2_user_config(self) -> None:
         self.personal_home()

@@ -1,5 +1,10 @@
 # Routing configuration v2
 
+In plugin v0.5, normal submission and lifecycle operations use the MCP
+conversation tools. Commands below are developer/configuration diagnostics;
+do not ask users to run them to submit ordinary work. The background controller
+manages retries; the host still interprets and submits requests.
+
 Python 3.11+ is required. The resolver uses only the standard library.
 
 ## Configuration source and editing
@@ -35,8 +40,9 @@ keys, missing references and wrong types are errors.
   IDs are not assumed to have independent quotas.
 - tasks: task names mapped to exactly {"role": "role-name"} or {"inline": true}.
 - fallback: the same shape, used for unknown task types.
-- max_attempts: total per-task model attempts including quality corrections.
-  The host supplies --attempt and tracks the count; no persistent counter exists.
+- max_attempts: total per-task model attempts. The background controller persists
+  its actual attempts and enforces the limit. A direct resolver invocation only
+  checks the caller's --attempt value; the resolver does not execute tasks.
 
 Bundled role preferences are GPT for discussion/reasoning/review and GLM for
 code tasks. These are configurable preferences, not benchmark rankings.
@@ -123,5 +129,6 @@ self/duplicate fallback entries and unknown references are errors.
 Advisory v1 family/tier/strengths/context labels and unused cooldown/status-code
 fields are not imported as verified capabilities or functioning mechanisms.
 To adopt the new default task grouping, create defaults at a new path and
-review them before replacing personal policy. v0.4 does not implement persistent
-cooldown, quota polling, automatic retries, or host-model failover.
+review them before replacing personal policy. The controller can retry confirmed
+availability failures within its stored budget. Persistent model cooldown, quota
+polling and recovery of host failures before submission remain unimplemented.
