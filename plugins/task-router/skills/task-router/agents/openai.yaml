@@ -1,3 +1,5 @@
 interface:
   display_name: "Task Router"
-  short_description: "Dispatcher plugin: delegate discussion to GPT-family and code tasks to GLM-family per routing.json, keep trivial exchanges inline"
+  short_description: "Route discussion and coding through model pools"
+policy:
+  allow_implicit_invocation: true

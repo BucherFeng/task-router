@@ -1,15 +1,15 @@
 {
   "name": "task-router",
-  "version": "0.3.0",
-  "description": "Dispatcher-style task routing: discussion to GPT-family, code tasks to GLM-family, trivial inline, with per-model failover chains",
+  "version": "0.4.0+codex.20260914084349",
+  "description": "Configurable model pools with strict validation, migration, compatibility checks and routing explanations",
   "author": {
     "name": "fengbochao"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Task Router",
-    "shortDescription": "Dispatcher routing: discussion to GPT, code to GLM, trivial inline",
-    "longDescription": "Installs the task-router skill: the host thread acts as a pure dispatcher, delegating discussion and planning to GPT-family models, code modifications and long-context analysis to GLM-family models, and keeping trivial exchanges inline. Routing targets and failover chains are config-driven via routing.json.",
+    "shortDescription": "Route tasks through configurable model pools",
+    "longDescription": "Uses a dispatcher skill and deterministic role-based model selection. Supports persistent user configuration, v1 migration, compatibility diagnostics and per-candidate explanations. Delegation and bounded retry are performed by the host agent; this plugin does not intercept API requests or recover a failed host model.",
     "developerName": "fengbochao",
     "category": "Productivity",
     "capabilities": [],

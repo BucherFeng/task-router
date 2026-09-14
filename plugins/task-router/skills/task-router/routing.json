@@ -1,61 +1,119 @@
 {
-  "version": 1,
-  "defaults": {
-    "primary": "glm-5.3-flash"
+  "schema_version": 2,
+  "dispatcher": {
+    "model_id": "glm-5.3-flash"
   },
-  "models": {
-    "glm-5.3-flash": {
-      "family": "glm",
-      "tier": "fast",
-      "strengths": ["conversation", "planning", "review"],
-      "context_window": "1m"
+  "profiles": {
+    "discussion-main": {
+      "model_id": "gpt-5.4",
+      "enabled": true,
+      "reasoning_effort": "medium"
     },
-    "glm-5.3": {
-      "family": "glm",
-      "tier": "flagship",
-      "strengths": ["coding", "agents", "long-horizon", "long-context"],
-      "context_window": "1m"
+    "discussion-backup": {
+      "model_id": "gpt-5.2",
+      "enabled": true,
+      "reasoning_effort": "medium"
     },
-    "gpt-5.5": {
-      "family": "gpt",
-      "tier": "standard",
-      "strengths": ["discussion", "planning", "reasoning"],
-      "context_window": "400k"
+    "reasoning-main": {
+      "model_id": "gpt-6-astra",
+      "enabled": true,
+      "reasoning_effort": "high"
     },
-    "gpt-5.6": {
-      "family": "gpt",
-      "tier": "advanced",
-      "strengths": ["discussion", "planning", "review", "reasoning"],
-      "context_window": "400k"
+    "reasoning-backup": {
+      "model_id": "gpt-5.6-sol",
+      "enabled": true,
+      "reasoning_effort": "high"
     },
-    "gpt-6": {
-      "family": "gpt",
-      "tier": "flagship",
-      "strengths": ["discussion", "planning", "review", "deep-reasoning"],
-      "context_window": "1m"
+    "review-main": {
+      "model_id": "gpt-5.5",
+      "enabled": true,
+      "reasoning_effort": "high"
+    },
+    "coding-main": {
+      "model_id": "glm-5.3",
+      "enabled": true,
+      "reasoning_effort": "high"
+    },
+    "coding-backup": {
+      "model_id": "glm-5.2",
+      "enabled": true,
+      "reasoning_effort": "high"
+    },
+    "coding-fast": {
+      "model_id": "glm-5.3-flash",
+      "enabled": true,
+      "reasoning_effort": "low"
+    },
+    "coding-fast-backup": {
+      "model_id": "glm-5-turbo",
+      "enabled": true,
+      "reasoning_effort": "none"
     }
   },
-  "routes": {
-    "trivial": { "delegate": false },
-    "discussion": { "delegate": true, "model": "gpt-6" },
-    "planning": { "delegate": true, "model": "gpt-6" },
-    "review": { "delegate": true, "model": "gpt-6" },
-    "small-edit": { "delegate": false },
-    "edit": { "delegate": true, "model": "glm-5.3" },
-    "bulk-rewrite": { "delegate": true, "model": "glm-5.3" },
-    "long-context": { "delegate": true, "model": "glm-5.3" },
-    "deep-analysis": { "delegate": true, "model": "gpt-6" }
+  "roles": {
+    "discussion": [
+      "discussion-main",
+      "discussion-backup",
+      "coding-main"
+    ],
+    "reasoning": [
+      "reasoning-main",
+      "reasoning-backup",
+      "coding-main"
+    ],
+    "review": [
+      "review-main",
+      "reasoning-backup",
+      "coding-main"
+    ],
+    "coding": [
+      "coding-main",
+      "coding-backup",
+      "coding-fast"
+    ],
+    "coding-light": [
+      "coding-fast",
+      "coding-fast-backup",
+      "coding-main"
+    ]
   },
-  "fallback": { "delegate": false },
-  "failover": {
-    "on_status": [429, 502, 503],
-    "cooldown_seconds": 300,
-    "chains": {
-      "glm-5.3-flash": ["glm-5.3"],
-      "glm-5.3": ["glm-5.3-flash"],
-      "gpt-6": ["gpt-5.6", "gpt-5.5", "glm-5.3"],
-      "gpt-5.6": ["gpt-6", "gpt-5.5", "glm-5.3"],
-      "gpt-5.5": ["gpt-6", "gpt-5.6", "glm-5.3"]
+  "tasks": {
+    "trivial": {
+      "inline": true
+    },
+    "discussion": {
+      "role": "discussion"
+    },
+    "planning": {
+      "role": "reasoning"
+    },
+    "review": {
+      "role": "review"
+    },
+    "deep-analysis": {
+      "role": "reasoning"
+    },
+    "read-code": {
+      "role": "coding-light"
+    },
+    "edit": {
+      "role": "coding"
+    },
+    "small-edit": {
+      "role": "coding-light"
+    },
+    "bulk-rewrite": {
+      "role": "coding"
+    },
+    "long-context": {
+      "role": "coding"
+    },
+    "test": {
+      "role": "coding"
     }
-  }
+  },
+  "fallback": {
+    "inline": true
+  },
+  "max_attempts": 3
 }
