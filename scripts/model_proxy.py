@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""Local family-aware model proxy for Codex.
+
+Sits between Codex and the upstream API. When a model of one family (gpt/glm)
+returns a family-level failure (HTTP 429/502/503), the whole family enters a
+cooldown and the request is retried once with the other family's preferred
+model, so a quota outage of one family does not interrupt an active session.
+"""
+
+import argparse
+import hashlib
+import http.client
+import json
+import os
+import signal
+import socket
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+DEFAULT_UPSTREAM = "https://api.infiniplan.xyz"
+DEFAULT_LISTEN = "127.0.0.1:8787"
+DEFAULT_COOLDOWN = 600
+DEFAULT_FAIL_STATUS = {429, 502, 503}
+STREAM_CHUNK = 8192
+MAX_BODY = 64 * 1024 * 1024
+MAX_ERROR_BODY = 1024 * 1024
+HOP_REQUEST_HEADERS = {
+    "host", "content-length", "transfer-encoding", "connection",
+    "keep-alive", "accept-encoding", "expect", "te", "upgrade",
+}
+HOP_RESPONSE_HEADERS = {
+    "transfer-encoding", "content-length", "connection", "keep-alive",
+}
+
+
+def family_of(model):
+    lowered = model.lower()
+    if lowered.startswith("glm"):
+        return "glm"
+    if lowered.startswith("gpt"):
+        return "gpt"
+    return None
+
+
+class CooldownState:
+    """Family/model cooldowns persisted so restarts do not clear outages."""
+
+    def __init__(self, path, cooldown_seconds):
+        self.path = Path(path).expanduser() if path else None
+        self.cooldown_seconds = cooldown_seconds
+        self.lock = threading.Lock()
+        self.families = {}
+        self.models = {}
+        self._load()
+
+    def _load(self):
+        if not self.path or not self.path.is_file():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.families = {str(k): float(v) for k, v in data.get("families", {}).items()}
+            self.models = {str(k): float(v) for k, v in data.get("models", {}).items()}
+        except (OSError, ValueError, TypeError, AttributeError):
+            self.families, self.models = {}, {}
+
+    def _save(self):
+        if not self.path:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(
+            {"families": self.families, "models": self.models}, indent=2), encoding="utf-8")
+        os.replace(temporary, self.path)
+
+    def family_until(self, family):
+        return self.families.get(family, 0)
+
+    def model_until(self, model):
+        return self.models.get(model, 0)
+
+    def cool_family(self, family, duration=None):
+        with self.lock:
+            self.families[family] = time.time() + (duration or self.cooldown_seconds)
+            self._save()
+
+    def cool_model(self, model, duration=None):
+        with self.lock:
+            self.models[model] = time.time() + (duration or self.cooldown_seconds)
+            self._save()
+
+
+class ProxyConfig:
+    def __init__(self, upstream, fallback, fail_statuses, cooldown_seconds, state_file):
+        self.upstream = upstream.rstrip("/")
+        self.fallback = fallback
+        self.fail_statuses = fail_statuses
+        self.state = CooldownState(state_file, cooldown_seconds)
+
+
+class ProxyHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 1800
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        self.handle_any()
+
+    def do_POST(self):
+        self.handle_any()
+
+    def do_PUT(self):
+        self.handle_any()
+
+    def do_PATCH(self):
+        self.handle_any()
+
+    def do_DELETE(self):
+        self.handle_any()
+
+    def do_OPTIONS(self):
+        self.handle_any()
+
+    def do_HEAD(self):
+        self.handle_any()
+
+    def _read_body(self):
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            body = bytearray()
+            while True:
+                size_line = self.rfile.readline(64).strip()
+                size = int(size_line.split(b";")[0], 16)
+                if size == 0:
+                    self.rfile.readline(64)
+                    break
+                if len(body) + size > MAX_BODY:
+                    raise ValueError("request body too large")
+                remaining = size
+                while remaining:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        raise ConnectionError("client disconnected mid-body")
+                    body.extend(chunk)
+                    remaining -= len(chunk)
+                self.rfile.readline(64)
+            return bytes(body)
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > MAX_BODY:
+            raise ValueError("request body too large")
+        return self.rfile.read(length) if length else b""
+
+    def _upstream_request(self, method, path, body):
+        cfg = self.server.cfg
+        parts = urlsplit(cfg.upstream)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        connector = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+        headers = {}
+        for key, value in self.headers.items():
+            if key.lower() in HOP_REQUEST_HEADERS:
+                continue
+            headers[key] = value
+        headers["Host"] = parts.netloc
+        headers["Accept-Encoding"] = "identity"
+        headers["Connection"] = "close"
+        if body or method in ("POST", "PUT", "PATCH"):
+            headers["Content-Length"] = str(len(body))
+        conn = connector(parts.hostname, port, timeout=30)
+        conn.request(method, path, body=body if body else None, headers=headers)
+        response = conn.getresponse()
+        if conn.sock is not None:
+            conn.sock.settimeout(600)
+        return conn, response
+
+    def _send_stream(self, status, headers, response, failover_note=None):
+        self.send_response(status)
+        for key, value in headers.items():
+            if key.lower() not in HOP_RESPONSE_HEADERS:
+                self.send_header(key, value)
+        if failover_note:
+            self.send_header("X-Task-Router-Failover", failover_note)
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        self.server.headers_sent = True
+        if self.command == "HEAD":
+            return
+        try:
+            while True:
+                chunk = response.read(STREAM_CHUNK)
+                if not chunk:
+                    break
+                self.wfile.write(b"%X\r\n" % len(chunk))
+                self.wfile.write(chunk)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, socket.timeout):
+            self.close_connection = True
+
+    def handle_any(self):
+        self.server.headers_sent = False
+        cfg = self.server.cfg
+        try:
+            if self.path.split("?")[0] == "/health":
+                body = json.dumps({"status": "ok", "time": time.time()}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+                return
+            body = self._read_body()
+        except (ConnectionError, ValueError) as exc:
+            self.send_error(400, str(exc))
+            return
+
+        model = None
+        parsed = None
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and isinstance(parsed.get("model"), str):
+                model = parsed["model"]
+        except (ValueError, UnicodeDecodeError):
+            parsed = None
+        family = family_of(model) if model else None
+
+        attempt_body = body
+        substitute = None
+        if model and family and cfg.state.family_until(family) > time.time():
+            candidate = cfg.fallback.get(family)
+            if candidate and cfg.state.family_until(family_of(candidate)) <= time.time():
+                substitute = candidate
+        if substitute and parsed is not None:
+            parsed["model"] = substitute
+            attempt_body = json.dumps(parsed, separators=(",", ":")).encode()
+
+        try:
+            conn, response = self._upstream_request(self.command, self.path, attempt_body)
+            failover_note = None
+            if response.status in cfg.fail_statuses and family:
+                if not substitute:
+                    cfg.state.cool_family(family)
+                    candidate = cfg.fallback.get(family)
+                    candidate_family = family_of(candidate) if candidate else None
+                    if candidate and candidate_family and candidate_family != family \
+                            and cfg.state.family_until(candidate_family) <= time.time():
+                        response.close()
+                        conn.close()
+                        if parsed is not None:
+                            parsed["model"] = candidate
+                            retry_body = json.dumps(parsed, separators=(",", ":")).encode()
+                        else:
+                            retry_body = body
+                        conn, response = self._upstream_request(self.command, self.path, retry_body)
+                        substitute = candidate
+                        failover_note = f"{family} exhausted -> {candidate}"
+                if substitute:
+                    # Only a still-failing fallback cools its family; a successful
+                    # retry proves the other family is healthy.
+                    if response.status in cfg.fail_statuses:
+                        cfg.state.cool_family(family_of(substitute))
+            try:
+                self._send_stream(response.status, response.headers, response, failover_note)
+            except (BrokenPipeError, ConnectionResetError, socket.timeout):
+                self.close_connection = True
+        except (OSError, http.client.HTTPException) as exc:
+            if not self.server.headers_sent:
+                self.send_error(502, f"proxy upstream error ({type(exc).__name__})")
+        finally:
+            try:
+                conn.close()
+            except (NameError, OSError):
+                pass
+
+
+class ProxyServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def build_server(listen, upstream, glm_fallback, gpt_fallback,
+                 state_file, cooldown_seconds, fail_statuses):
+    fail_statuses = {int(code) for code in fail_statuses}
+    cfg = ProxyConfig(upstream, {"glm": glm_fallback, "gpt": gpt_fallback},
+                      set(fail_statuses), cooldown_seconds, state_file)
+    host, _, port = listen.rpartition(":")
+    server = ProxyServer((host or "127.0.0.1", int(port)), ProxyHandler)
+    server.cfg = cfg
+    server.state = cfg.state
+    return server
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--listen", default=DEFAULT_LISTEN, help="HOST:PORT to listen on")
+    parser.add_argument("--upstream", default=DEFAULT_UPSTREAM, help="upstream API origin")
+    parser.add_argument("--glm-fallback", default="gpt-6-astra",
+                        help="model used when the GLM family is exhausted")
+    parser.add_argument("--gpt-fallback", default="glm-5.3",
+                        help="model used when the GPT family is exhausted")
+    parser.add_argument("--cooldown-seconds", type=int, default=DEFAULT_COOLDOWN)
+    parser.add_argument("--fail-status", default="429,502,503",
+                        help="comma-separated HTTP statuses treated as family failures")
+    parser.add_argument("--state-file",
+                        default=str(Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+                                       / "task-router/proxy-state.json"))
+    args = parser.parse_args()
+
+    fail_statuses = {int(code) for code in args.fail_status.split(",")}
+    server = build_server(args.listen, args.upstream, args.glm_fallback, args.gpt_fallback,
+                          args.state_file, args.cooldown_seconds, fail_statuses)
+
+    def stop(*_):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    host, port = server.server_address[:2]
+    print(f"task-router proxy listening on {host}:{port} -> {args.upstream}", flush=True)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
