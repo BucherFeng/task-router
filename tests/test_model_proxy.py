@@ -78,12 +78,17 @@ class ProxyTests(unittest.TestCase):
     def start_proxy(self, cooldown=600, state_file=None, fail_statuses="429,502,503",
                     glm_fallback="gpt-6-astra", gpt_fallback="glm-5.3"):
         state = state_file or (self.root / "proxy-state.json")
+        access_log = self.root / "proxy-access.jsonl"
         server = build_server("127.0.0.1:0", f"http://127.0.0.1:{self.upstream_port}",
-                              glm_fallback, gpt_fallback, state, cooldown, fail_statuses.split(","))
+                              glm_fallback, gpt_fallback, state, cooldown,
+                              fail_statuses.split(","), access_log)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         return server.server_address[1], state
+
+    def access_log(self):
+        return [json.loads(line) for line in (self.root / "proxy-access.jsonl").read_text().splitlines()]
 
     def request(self, port, model="glm-5.3", body=None, method="POST"):
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -105,6 +110,20 @@ class ProxyTests(unittest.TestCase):
         self.assertIn(b"fixture done", data)
         self.assertEqual(self.upstream_requests, ["glm-5.3", "gpt-6-astra"])
         self.assertEqual(headers.get("X-Task-Router-Failover"), "glm exhausted -> gpt-6-astra")
+
+    def test_access_log_records_failover_without_credentials(self):
+        self.upstream.logic = lambda model: (
+            (503, "glm overloaded", "application/json")
+            if model.startswith("glm") else (200, [b"ok"], "text/event-stream"))
+        port, _ = self.start_proxy()
+        self.request(port, model="glm-5.3")
+        entries = self.access_log()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["model_in"], "glm-5.3")
+        self.assertEqual(entries[0]["model_out"], "gpt-6-astra")
+        self.assertEqual(entries[0]["result"], "family_failover")
+        self.assertEqual(entries[0]["upstream_status"], 200)
+        self.assertNotIn("Authorization", json.dumps(entries[0]))
 
     def test_cooldown_skips_dead_family_without_upstream_retry(self):
         self.upstream.logic = lambda model: (

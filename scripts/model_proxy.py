@@ -94,11 +94,13 @@ class CooldownState:
 
 
 class ProxyConfig:
-    def __init__(self, upstream, fallback, fail_statuses, cooldown_seconds, state_file):
+    def __init__(self, upstream, fallback, fail_statuses, cooldown_seconds, state_file, access_log):
         self.upstream = upstream.rstrip("/")
         self.fallback = fallback
         self.fail_statuses = fail_statuses
         self.state = CooldownState(state_file, cooldown_seconds)
+        self.access_log = Path(access_log).expanduser() if access_log else None
+        self.log_lock = threading.Lock()
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -107,6 +109,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    def _log_access(self, entry):
+        cfg = self.server.cfg
+        if cfg.access_log is None:
+            return
+        try:
+            with cfg.log_lock:
+                if cfg.access_log.exists() and cfg.access_log.stat().st_size > 10 * 1024 * 1024:
+                    cfg.access_log.with_suffix(".jsonl.old").write_text("", encoding="utf-8")
+                    cfg.access_log.write_text("", encoding="utf-8")
+                with cfg.access_log.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        except OSError:
+            pass
 
     def do_GET(self):
         self.handle_any()
@@ -207,6 +223,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def handle_any(self):
         self.server.headers_sent = False
         cfg = self.server.cfg
+        log_entry = {"ts": time.time(), "method": self.command,
+                     "path": self.path.split("?")[0], "model_in": None,
+                     "model_out": None, "family": None,
+                     "upstream_status": None, "result": "passthrough"}
         try:
             if self.path.split("?")[0] == "/health":
                 body = json.dumps({"status": "ok", "time": time.time()}).encode()
@@ -231,6 +251,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             parsed = None
         family = family_of(model) if model else None
+        log_entry.update(model_in=model, family=family)
 
         attempt_body = body
         substitute = None
@@ -238,6 +259,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             candidate = cfg.fallback.get(family)
             if candidate and cfg.state.family_until(family_of(candidate)) <= time.time():
                 substitute = candidate
+                log_entry.update(model_out=substitute, result="rewritten_family_cooldown")
         if substitute and parsed is not None:
             parsed["model"] = substitute
             attempt_body = json.dumps(parsed, separators=(",", ":")).encode()
@@ -262,6 +284,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         conn, response = self._upstream_request(self.command, self.path, retry_body)
                         substitute = candidate
                         failover_note = f"{family} exhausted -> {candidate}"
+                        log_entry.update(model_out=candidate, result="family_failover")
+                    elif candidate and candidate_family and cfg.state.family_until(candidate_family) > time.time():
+                        log_entry["result"] = "fallback_family_also_cooling"
                 if substitute:
                     # Only a still-failing fallback cools its family; a successful
                     # retry proves the other family is healthy.
@@ -275,6 +300,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if not self.server.headers_sent:
                 self.send_error(502, f"proxy upstream error ({type(exc).__name__})")
         finally:
+            log_entry["upstream_status"] = response.status if response is not None else None
+            self._log_access(log_entry)
             try:
                 conn.close()
             except (NameError, OSError):
@@ -287,10 +314,10 @@ class ProxyServer(ThreadingHTTPServer):
 
 
 def build_server(listen, upstream, glm_fallback, gpt_fallback,
-                 state_file, cooldown_seconds, fail_statuses):
+                 state_file, cooldown_seconds, fail_statuses, access_log=None):
     fail_statuses = {int(code) for code in fail_statuses}
     cfg = ProxyConfig(upstream, {"glm": glm_fallback, "gpt": gpt_fallback},
-                      set(fail_statuses), cooldown_seconds, state_file)
+                      set(fail_statuses), cooldown_seconds, state_file, access_log)
     host, _, port = listen.rpartition(":")
     server = ProxyServer((host or "127.0.0.1", int(port)), ProxyHandler)
     server.cfg = cfg
@@ -312,11 +339,14 @@ def main():
     parser.add_argument("--state-file",
                         default=str(Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
                                        / "task-router/proxy-state.json"))
+    parser.add_argument("--access-log",
+                        default=str(Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+                                       / "task-router/proxy-access.jsonl"))
     args = parser.parse_args()
 
     fail_statuses = {int(code) for code in args.fail_status.split(",")}
     server = build_server(args.listen, args.upstream, args.glm_fallback, args.gpt_fallback,
-                          args.state_file, args.cooldown_seconds, fail_statuses)
+                          args.state_file, args.cooldown_seconds, fail_statuses, args.access_log)
 
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()

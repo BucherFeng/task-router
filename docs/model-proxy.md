@@ -44,6 +44,7 @@ systemctl --user status task-router-proxy      # 查看服务状态
 systemctl --user restart task-router-proxy     # 重启（冷却状态保留）
 curl -sS http://127.0.0.1:8787/health          # 健康检查
 cat ~/.local/state/task-router/proxy-state.json  # 查看当前冷却
+tail -f ~/.local/state/task-router/proxy-access.jsonl  # 观察每次请求的模型改写
 ~~~
 
 回退直连：将 config.toml 的 base_url 改回 https://api.infiniplan.xyz/v1，
@@ -53,7 +54,8 @@ cat ~/.local/state/task-router/proxy-state.json  # 查看当前冷却
 
 - 13 项本地 socket 测试通过（假上游）：按类切换、冷却跳过与过期、双类
   耗尽透传、SSE 流式保序透传、非 JSON 透传、未知家族不改写、状态持久化、
-  健康检查；另有成功重试不冷却备选家族的回归测试。
+  健康检查；另有成功重试不冷却备选家族、访问日志记录改写且不含凭据的
+  回归测试。
 - 真实验证：/v1/models 透传返回真实模型列表；glm-5.3-flash 真实请求经代理
   正常返回；codex exec 端到端（含流式）经代理完成并返回 PROXY-E2E-OK。
 - 未验证：上游真实 503 的在线注入（需要真实耗尽场景）；macOS/WSL；Codex
