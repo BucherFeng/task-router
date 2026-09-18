@@ -25,5 +25,34 @@ jobs:
         run: pip install mcp==1.27.0
       - name: Check installer syntax
         run: bash -n install.sh
+      - name: Check repository language
+        run: |
+          python3 - <<'PY'
+          import ast
+          import json
+          import subprocess
+          import unicodedata
+          from pathlib import Path
+
+          def contains_cjk(text):
+              return any(unicodedata.name(char, "").startswith("CJK") for char in text)
+
+          failures = []
+          files = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          for name in filter(None, files):
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              samples = [name, text]
+              if path.suffix == ".json":
+                  samples.append(json.dumps(json.loads(text), ensure_ascii=False))
+              elif path.suffix == ".py":
+                  samples.extend(node.value for node in ast.walk(ast.parse(text))
+                                 if isinstance(node, ast.Constant) and isinstance(node.value, str))
+              if any(contains_cjk(sample) for sample in samples):
+                  failures.append(name)
+          if failures:
+              raise SystemExit("Use English repository text: " + ", ".join(failures))
+          print("Repository text, JSON values, and Python literals passed the language check.")
+          PY
       - name: Run tests
         run: python3 -B -m unittest discover -s tests -q

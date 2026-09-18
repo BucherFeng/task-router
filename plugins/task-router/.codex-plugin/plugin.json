@@ -2,7 +2,7 @@
   "name": "task-router",
   "license": "MIT",
   "repository": "https://github.com/BucherFeng/task-router",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Managed model routing from Codex conversation with background execution and durable task status",
   "author": {
     "name": "fengbochao"
@@ -17,8 +17,8 @@
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": [
-      "\u7528 task-router \u5904\u7406\u8fd9\u4e2a\u4ee3\u7801\u4fee\u6539\u4efb\u52a1",
-      "\u8ba8\u8bba\u65b9\u6848\uff0c\u7136\u540e\u628a\u7ed3\u8bba\u6d3e\u7ed9 GLM-5.3 \u6267\u884c"
+      "Use task-router to implement this code change.",
+      "Discuss the approach, then delegate the implementation."
     ]
   }
 }

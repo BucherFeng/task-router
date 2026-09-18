@@ -7,7 +7,6 @@ import shlex
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 root = Path(os.environ["TASK_ROUTER_SYSTEMD_FIXTURE"])

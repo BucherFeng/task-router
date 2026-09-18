@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "plugins/task-router/skills/task-router/scripts"
 sys.path.insert(0, str(SCRIPTS))
-from router_core import (ConfigError, catalog_models, choose, config_path, migrate,
+from router_core import (ConfigError, choose, migrate,
                          normalize, read_json, runtime_models, validate, write_new)
 
 

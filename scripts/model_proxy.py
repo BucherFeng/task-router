@@ -22,10 +22,8 @@ from urllib.parse import urlsplit
 DEFAULT_UPSTREAM = "https://api.infiniplan.xyz"
 DEFAULT_LISTEN = "127.0.0.1:8787"
 DEFAULT_COOLDOWN = 600
-DEFAULT_FAIL_STATUS = {502, 503}
 STREAM_CHUNK = 8192
 MAX_BODY = 64 * 1024 * 1024
-MAX_ERROR_BODY = 1024 * 1024
 HOP_REQUEST_HEADERS = {
     "host", "content-length", "transfer-encoding", "connection",
     "keep-alive", "accept-encoding", "expect", "te", "upgrade",
@@ -77,19 +75,10 @@ class CooldownState:
     def family_until(self, family):
         return self.families.get(family, 0)
 
-    def model_until(self, model):
-        return self.models.get(model, 0)
-
     def cool_family(self, family, duration=None):
         with self.lock:
             self.families[family] = time.time() + (duration or self.cooldown_seconds)
             self._save()
-
-    def cool_model(self, model, duration=None):
-        with self.lock:
-            self.models[model] = time.time() + (duration or self.cooldown_seconds)
-            self._save()
-
 
 class ProxyConfig:
     def __init__(self, upstream, fallback, fail_statuses, cooldown_seconds, state_file,
@@ -227,6 +216,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             try:
                 # read1 forwards currently available bytes without waiting for an 8 KiB block.
                 chunk = response.read1(STREAM_CHUNK)
+                if not chunk and response.length not in (None, 0):
+                    raise http.client.IncompleteRead(b"", response.length)
             except (http.client.HTTPException, OSError) as exc:
                 # Upstream died mid-stream. Cooling the family makes Codex's own
                 # retry land on the other family instead of repeating the failure.

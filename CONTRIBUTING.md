@@ -1,57 +1,62 @@
 # Contributing
 
-感谢你对 task-router 的关注。
+Contributions should keep installation, routing, and recovery behavior reproducible.
 
-## 开发环境
+## Development setup
 
 ```bash
 git clone https://github.com/BucherFeng/task-router.git
 cd task-router
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install mcp==1.27.0
 python3 -B -m unittest discover -s tests -q
 ```
 
-要求：
+Requirements:
 
 - Python 3.11+
-- 自动化测试使用临时目录、模拟 Codex/systemd 命令和本地回环服务；真实部署需要 Codex CLI。
-- Linux（当前唯一已验证平台；macOS/WSL 欢迎贡献验证）
+- Automated tests use temporary directories, fake Codex/systemd commands, and local
+  loopback servers. A real deployment requires Codex CLI.
+- Linux with local socket access for the test suite.
 
-## 项目结构
+## Repository layout
 
 ```text
-plugins/task-router/       插件源码（分发单元）
+plugins/task-router/       Self-contained plugin distribution
   .codex-plugin/           manifest
-  .mcp.json                MCP 服务配置
-  skills/task-router/      skill 指令和路由解析器
-  scripts/                 MCP 服务、后台执行器、控制器
-scripts/                   安装器、模型代理（独立于插件分发）
-tests/                     全部测试
-docs/                      当前运行结构与代理运维说明
+  .mcp.json                MCP service configuration
+  skills/task-router/      Workflow instructions and routing resolver
+  scripts/                 MCP tools, background executor, and controller
+scripts/                   Complete installer and standalone model proxy
+tests/                     Automated tests and isolated fixtures
+docs/                      Current architecture and proxy operations
 ```
 
-## 测试
+## Testing
 
-提交前运行全部测试：
+Run the full suite before submitting a change:
 
 ```bash
 python3 -B -m unittest discover -s tests -q
 ```
 
-- 路由和配置测试不需要网络。
-- MCP 集成测试需要 `mcp` SDK（`pip install mcp==1.27.0`）。
-- 模型代理测试绑定本地回环端口。
+- Routing and configuration tests run locally.
+- MCP integration tests use the SDK installed during development setup.
+- Proxy tests bind local loopback ports and use a fake upstream.
 
-开发时可直接调用插件内的任务入口：
+The packaged task runner is available for developer diagnostics:
 
 ```bash
 python3 plugins/task-router/scripts/run_task.py --help
 ```
 
-测试直接导入插件包内的运行代码，与安装后的执行路径保持一致。
+Tests import runtime code directly from the plugin package, matching installed
+execution paths. Credentials and live model requests are not needed by the suite.
 
-## 提交规范
+## Commit messages
 
-使用 conventional commits：
+Use Conventional Commits:
 
 ```text
 feat: add stream drop cooldown
@@ -61,10 +66,11 @@ refactor: extract rewrite helper
 test: add 429 regression
 ```
 
-## 发布流程
+## Releases
 
-1. 更新 `CHANGELOG.md`。
-2. 更新 `plugins/task-router/.codex-plugin/plugin.json` 的版本号。
-3. 运行全部测试。
-4. 测试通过后提交；创建对应版本的 tag 并推送指定 tag。
-5. 在 GitHub 创建 Release 并附上 CHANGELOG 对应段落。
+1. Update `CHANGELOG.md`, the plugin manifest, and installer version consistently.
+2. Update version fixtures and run the complete test suite.
+3. Check repository text and decoded JSON strings for English-only content.
+4. Commit, create a new version tag, and push the branch and tag after checks pass.
+5. Create a GitHub Release with the matching changelog entry, full source archives,
+   and SHA-256 checksums. Preserve previously published tags and release artifacts.

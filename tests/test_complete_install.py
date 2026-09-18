@@ -12,7 +12,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from test_install import FAKE_CODEX, MARKETPLACE
+from test_install import FAKE_CODEX
 
 ROOT = Path(__file__).resolve().parents[1]
 

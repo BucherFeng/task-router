@@ -47,6 +47,15 @@ class FakeUpstream(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         self.send_response(200)
+        if content_type == "x-short-body":
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload) + 100))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+            self.wfile.flush()
+            self.close_connection = True
+            return
         self.send_header("Content-Type", content_type)
         if content_type in ("text/event-stream", "x-abort-stream"):
             self.send_header("Connection", "close")
@@ -216,6 +225,21 @@ class ProxyTests(unittest.TestCase):
                 break
             time.sleep(0.02)
         self.assertEqual(entries[0]["result"], "rate_limit_passthrough")
+
+    def test_truncated_content_length_is_a_stream_failure(self):
+        self.upstream.logic = lambda model: (
+            (200, b'{"incomplete":', "x-short-body")
+            if model == "glm-5.3" else (200, "complete", "application/json"))
+        port, state_file = self.start_proxy()
+        with self.assertRaises(http.client.IncompleteRead):
+            self.request(port, model="glm-5.3")
+        record = self.access_log()[0]
+        self.assertEqual(record["result"], "upstream_stream_drop")
+        self.assertEqual(record["stream_drop_error"], "IncompleteRead")
+        self.assertGreater(json.loads(state_file.read_text())["families"]["glm"], time.time())
+        status, _, _ = self.request(port, model="glm-5.3")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream_requests, ["glm-5.3", "gpt-6-astra"])
 
     def test_cooldown_skips_dead_family_without_upstream_retry(self):
         self.upstream.logic = lambda model: (

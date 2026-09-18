@@ -1,21 +1,23 @@
-# 模型代理
+# Model proxy
 
-模型代理为经过本地地址的 Codex API 请求提供 GPT/GLM 家族切换、冷却状态保存
-和路由日志。实现位于 `scripts/model_proxy.py`，完整安装由 `scripts/proxy_install.py` 部署。
+The model proxy provides GPT/GLM family failover, persistent cooldowns, and routing
+logs for requests sent through its local endpoint. The implementation is in
+`scripts/model_proxy.py`; `scripts/proxy_install.py` handles complete deployment.
 
-## 完整安装
+## Complete installation
 
-在仓库根目录运行：
+Run from the repository root:
 
 ```bash
 ./install.sh
 ```
 
-安装器读取当前 Codex provider 的 API 地址，部署代理和 `task-router-proxy.service`，
-验证本次服务实例的健康状态后再切换 `base_url`。原始 API 路径、密钥环境变量引用
-以及其他 provider 设置得到保留；安装前配置另存备份。
+The installer reads the current Codex provider URL, deploys the proxy and
+`task-router-proxy.service`, and verifies the new service instance before switching
+`base_url`. It preserves the API path, credential environment-variable references,
+and unrelated provider settings, and saves a configuration backup.
 
-可指定监听端口和跨家族目标：
+Set the listening port and cross-family targets:
 
 ```bash
 ./install.sh --proxy-port 8787 \
@@ -23,44 +25,49 @@
   --gpt-fallback glm-5.3
 ```
 
-`--glm-fallback` 指定 GLM 家族不可用时使用的 GPT 模型；`--gpt-fallback` 指定
-GPT 家族不可用时使用的 GLM 模型。完整安装采用 HTTP Responses 接口，并关闭
-所选 provider 的 WebSocket 传输，以使请求经过本地 HTTP 代理。
+`--glm-fallback` selects the GPT model used when GLM is unavailable.
+`--gpt-fallback` selects the GLM model used when GPT is unavailable. Complete
+installation uses HTTP Responses requests and disables the selected provider's
+WebSocket transport so requests pass through the local HTTP proxy.
 
-## 路由行为
+## Routing behavior
 
-完整安装的预设适用于“HTTP 503 表示某个模型家族额度耗尽”的 API 服务。
+The complete-install preset targets providers where HTTP 503 signals exhausted
+quota for an entire model family.
 
-| 请求情况 | 处理方式 |
+| Condition | Action |
 |---|---|
-| 请求家族正常 | 使用原始模型转发请求 |
-| 收到配置中的家族故障状态码 | 冷却该家族，在响应输出前尝试另一个未冷却家族 |
-| 请求家族已冷却、另一家族可用 | 直接改写为另一个家族的目标模型 |
-| 429 限流 | 透传响应，供调用方退避重试 |
-| 读取上游响应发生异常 | 记录异常，并对该请求实际目标家族设置短冷却 |
-| 候选家族也处于冷却期 | 保留当前上游响应，不循环重试候选 |
-| 请求没有可识别的模型家族 | 原样转发 |
+| Requested family is available | Forward using the requested model |
+| Configured family-failure status received | Cool the family and attempt the other eligible family before sending the response |
+| Requested family is cooling and the other is available | Rewrite directly to the other family's target |
+| HTTP 429 | Forward the response for client backoff |
+| Upstream read error | Record the error and apply a short cooldown to the selected family |
+| Fallback family is also cooling | Return the current upstream response instead of cycling candidates |
+| No recognized model family | Forward the request unchanged |
 
-完整安装指定家族故障码为 `503`、冷却时间为 600 秒；独立启动代理时可通过
-`--fail-status` 和 `--cooldown-seconds` 配置。直接运行代理 CLI 的默认故障码为
-`502,503`。上游读取异常的短冷却默认 120 秒，由 `--stream-drop-cooldown` 控制。
+Complete installation sets the family-failure code to `503` and the cooldown to
+600 seconds. Standalone proxy arguments `--fail-status` and `--cooldown-seconds`
+control these values; the standalone CLI defaults to `502,503`. Upstream read
+errors use a 120-second cooldown, configurable with `--stream-drop-cooldown`.
 
-代理转发请求携带的上下文和工具信息。已开始输出的响应发生异常时，代理关闭
-该响应并记录状态；调用方后续重试可以使用更新后的家族选择。
+Context and tool information in the request are forwarded. If reading a response
+fails after output has begun, the proxy closes that response and records the error.
+A subsequent client retry can use the updated family selection.
 
-## 服务与文件
+## Service and files
 
-| 路径 | 用途 |
+| Path | Purpose |
 |---|---|
-| `~/.local/share/task-router/model_proxy.py` | 完整安装部署的代理程序 |
-| `~/.config/systemd/user/task-router-proxy.service` | systemd 用户服务单元 |
-| `~/.local/state/task-router/original-base-url` | 保存的原始上游地址 |
-| `~/.local/state/task-router/proxy-install.json` | provider、代理地址和配置备份位置 |
-| `~/.local/state/task-router/proxy-state.json` | 家族冷却状态 |
-| `~/.local/state/task-router/proxy-access.jsonl` | 请求路由日志 |
+| `~/.local/share/task-router/model_proxy.py` | Installed proxy executable |
+| `~/.config/systemd/user/task-router-proxy.service` | systemd user service unit |
+| `~/.local/state/task-router/original-base-url` | Saved upstream URL |
+| `~/.local/state/task-router/proxy-install.json` | Provider, local endpoint, and configuration backup metadata |
+| `~/.local/state/task-router/proxy-state.json` | Family cooldown state |
+| `~/.local/state/task-router/proxy-access.jsonl` | Request routing log |
 
-服务随用户 systemd 会话启动，异常退出后自动重启。冷却状态在重启后继续使用。
-监听地址为本地回环地址，默认端口为 `8787`。
+The service starts with the user's systemd session and restarts after abnormal
+exits. Cooldowns persist across restarts. The listener binds to loopback, using
+port `8787` by default.
 
 ```bash
 systemctl --user status task-router-proxy
@@ -69,35 +76,40 @@ curl -sS http://127.0.0.1:8787/health
 tail -f ~/.local/state/task-router/proxy-access.jsonl
 ```
 
-## 观察模型选择
+## Observing model selection
 
-访问日志记录 `model_in`、`model_out`、`upstream_status` 和 `result`。
-`model_in` 是原始请求模型；非空的 `model_out` 是代理改写后的目标，为空表示沿用
-原始模型。状态码用于判断最终上游响应是否成功。
+Access records include `model_in`, `model_out`, `upstream_status`, and `result`.
+`model_in` is the requested model. A non-null `model_out` is the rewritten target;
+null means the original model was retained. The status code describes the final
+upstream response.
 
-| `result` | 含义 |
+| `result` | Meaning |
 |---|---|
-| `passthrough` | 原样转发 |
-| `family_failover` | 家族故障后尝试跨类请求 |
-| `rewritten_family_cooldown` | 根据冷却状态直接改写请求 |
-| `rate_limit_passthrough` | 透传首次上游响应的限流状态 |
-| `fallback_family_also_cooling` | 候选家族也在冷却中 |
-| `upstream_stream_drop` | 读取上游响应发生异常 |
+| `passthrough` | Forwarded without rewriting |
+| `family_failover` | Attempted a cross-family request after a family failure |
+| `rewritten_family_cooldown` | Rewritten according to existing cooldown state |
+| `rate_limit_passthrough` | Forwarded a rate-limit response from the initial upstream request |
+| `fallback_family_also_cooling` | The fallback family is also cooling |
+| `upstream_stream_drop` | Reading the upstream response failed |
 
-改写响应包含 `X-Task-Router-Failover` 头。代理也可在请求 `instructions` 中追加
-目标模型提示，帮助解释路由；`--no-announce-model-rewrite` 用于关闭此提示。
-界面中的会话型号是用户选择的模型，路由日志记录代理实际发送的目标。
+Rewritten responses include `X-Task-Router-Failover`. The proxy can also append a
+target-model note to request `instructions`; use `--no-announce-model-rewrite` to
+disable that note. The Codex session label remains the user's selection, while
+proxy logs record the target sent upstream.
 
-## 更新与恢复连接
+## Upgrades and direct connections
 
-重新运行完整安装会更新代理程序，保留个人路由配置，并使用保存的上游地址。
-迁移已有手动代理时，通过 `--upstream` 提供原始 API base URL。
+Rerun complete installation to update the proxy while preserving user routing
+settings and the saved upstream URL. Use `--upstream` with the original API base
+URL when migrating a manually configured proxy.
 
-需要恢复直连时，读取 `proxy-install.json` 中的 `provider` 和 `upstream`，将对应
-provider 的 `base_url` 恢复为原始值，然后重新启动 Codex。确认使用直连后，可执行：
+To restore a direct connection, read `provider` and `upstream` from
+`proxy-install.json`, restore that provider's `base_url`, and restart Codex.
+After confirming the direct connection, stop the proxy with:
 
 ```bash
 systemctl --user disable --now task-router-proxy
 ```
 
-保留的配置备份可用于核对原始连接设置。开发和测试方式见 [CONTRIBUTING](../CONTRIBUTING.md)。
+Use the saved configuration backup to compare the original connection settings.
+See [Contributing](../CONTRIBUTING.md) for development and testing commands.

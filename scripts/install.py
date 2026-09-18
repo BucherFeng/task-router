@@ -25,7 +25,7 @@ from proxy_install import ProxyDeployment, ProxyInstallError
 PLUGIN_NAME = "task-router"
 EXPECTED_MARKETPLACE_NAME = "fengbochao-plugins"
 EXPECTED_SOURCE_PATH = "./plugins/task-router"
-REQUIRED_VERSION = "1.0.0"
+REQUIRED_VERSION = "1.0.1"
 MCP_CONFIG_DEFAULT = "./.mcp.json"
 MCP_REQUIRED_PATHS = (
     "scripts/bootstrap_mcp.py",
@@ -48,7 +48,6 @@ class InstallError(Exception):
 @dataclass
 class PreparedConfig:
     temporary: Path | None
-    existing: Path | None
     backup: Path | None = None
     installed: bool = False
 
@@ -329,7 +328,7 @@ def unlink_owned(path: Path) -> None:
         pass
 
 
-def swap_directory(stage: Path, destination: Path, backup_root: Path) -> tuple[Path | None, Path | None]:
+def swap_directory(stage: Path, destination: Path, backup_root: Path) -> Path | None:
     backup: Path | None = None
     if destination.exists() or destination.is_symlink():
         reject_symlink(destination, "managed plugin destination")
@@ -343,7 +342,7 @@ def swap_directory(stage: Path, destination: Path, backup_root: Path) -> tuple[P
         if backup is not None and not destination.exists():
             os.replace(backup, destination)
         raise
-    return backup, None
+    return backup
 
 
 def user_config_path(home: Path, explicit_home: bool) -> Path:
@@ -380,7 +379,7 @@ def prepare_user_config(config: Path, bundled: Path, router: Path) -> PreparedCo
         elif detect_config_version(existing_data, config) == 2:
             validate_router_config(router, config, "persistent routing config")
             unlink_owned(output)
-            return PreparedConfig(None, config)
+            return PreparedConfig(None)
         else:
             run(
                 [sys.executable, str(router), "--migrate", "--config", str(config), "--output", str(output)],
@@ -390,7 +389,7 @@ def prepare_user_config(config: Path, bundled: Path, router: Path) -> PreparedCo
         if detect_config_version(migrated, output) != 2:
             raise InstallError("router migration did not produce schema version 2")
         validate_router_config(router, output, "migrated routing config")
-        return PreparedConfig(output, config)
+        return PreparedConfig(output)
     except Exception:
         unlink_owned(output)
         raise
@@ -421,7 +420,7 @@ def prepare_config_from_old_bundle(config: Path, destination: Path, router: Path
         if detect_config_version(migrated, output) != 2:
             raise InstallError("router migration did not produce schema version 2")
         validate_router_config(router, output, "migrated routing config")
-        return PreparedConfig(output, config)
+        return PreparedConfig(output)
     except Exception:
         unlink_owned(output)
         raise
@@ -441,13 +440,13 @@ def prepare_default_config(config: Path, router: Path) -> PreparedConfig:
         if detect_config_version(initialized, output) != 2:
             raise InstallError("router initialization did not produce schema version 2")
         validate_router_config(router, output, "initialized routing config")
-        return PreparedConfig(output, config)
+        return PreparedConfig(output)
     except Exception:
         unlink_owned(output)
         raise
 
 
-def commit_config(prepared: PreparedConfig, config: Path, backup_root: Path) -> None:
+def commit_config(prepared: PreparedConfig, config: Path) -> None:
     if prepared.temporary is None:
         return
     backup: Path | None = None
@@ -466,7 +465,7 @@ def commit_config(prepared: PreparedConfig, config: Path, backup_root: Path) -> 
     prepared.installed = True
 
 
-def rollback_config(prepared: PreparedConfig, config: Path, backup_root: Path) -> Path | None:
+def rollback_config(prepared: PreparedConfig, config: Path) -> Path | None:
     artifact: Path | None = None
     if prepared.installed:
         if config.exists() or config.is_symlink():
@@ -502,7 +501,7 @@ def register_or_install(
     run(["codex", "plugin", "add", selector], f"Codex installation of {selector}")
 
 
-def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | None, Path | None]:
+def install(args: argparse.Namespace) -> None:
     if sys.version_info < (3, 11):
         raise InstallError("Python 3.11 or newer is required")
     if shutil.which("codex") is None:
@@ -576,7 +575,7 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
                 detect_config_version(existing, config)
                 if detect_config_version(existing, config) == 2:
                     validate_router_config(router, config, "persistent routing config")
-                    prepared_config = PreparedConfig(None, config)
+                    prepared_config = PreparedConfig(None)
                 else:
                     prepared_config = prepare_user_config(config, old_bundle, router)
             elif old_bundle.is_file():
@@ -588,18 +587,18 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
                     router,
                 )
             stage = stage_plugin(plugin, destination_parent, backup_root)
-            directory_backup, _ = swap_directory(stage, destination, backup_root)
+            directory_backup = swap_directory(stage, destination, backup_root)
             stage = None
             directory_installed = True
             if prepared_config is not None:
-                commit_config(prepared_config, config, backup_root)
+                commit_config(prepared_config, config)
         else:
             prepared_config = prepare_user_config(
                 config,
                 repo / "plugins" / PLUGIN_NAME / "skills" / PLUGIN_NAME / "routing.json",
                 router,
             )
-            commit_config(prepared_config, config, backup_root)
+            commit_config(prepared_config, config)
 
         register_or_install(personal_exists, repo, marketplace_name)
         if deployment is not None:
@@ -608,7 +607,7 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
         recovery_errors = []
         if prepared_config is not None:
             try:
-                config_artifact = rollback_config(prepared_config, config, backup_root)
+                config_artifact = rollback_config(prepared_config, config)
             except Exception as recovery:
                 recovery_errors.append(f"configuration recovery failed: {recovery}")
         if directory_installed:
@@ -645,12 +644,7 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
         print(f"previous plugin backup: {directory_backup}")
     if prepared_config is not None and prepared_config.backup is not None:
         print(f"previous routing config backup: {prepared_config.backup}")
-    if config_artifact is not None:
-        print(f"failed routing config retained at: {config_artifact}")
-    if directory_artifact is not None:
-        print(f"failed plugin directory retained at: {directory_artifact}")
     print("start a new Codex thread to load the updated plugin")
-    return directory_backup, config_artifact, directory_artifact, prepared_config.backup if prepared_config else None
 
 
 def main(argv: list[str] | None = None) -> int:
