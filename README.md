@@ -40,11 +40,14 @@ codex plugin add task-router@fengbochao-plugins
 
 ### 验证
 
-在 Codex 对话中说：
+新开一个 Codex 对话，正常使用即可：
 
-```text
-用 task-router 诊断一下配置
-```
+> 帮我分析这个项目的架构
+> 修复 src/auth.py 里的登录 bug
+> 审查一下最近的改动
+
+task-router 自动按任务类型分配模型。如果某次没有触发自动路由，加上
+"用 task-router" 前缀即可确保。
 
 或从终端运行：
 
