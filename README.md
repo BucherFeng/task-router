@@ -1,105 +1,166 @@
 # task-router
 
-Codex 多模型任务管理插件，当前版本 v0.5.0。
+[![CI](https://github.com/fengbochao/task-router/actions/workflows/ci.yml/badge.svg)](https://github.com/fengbochao/task-router/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-113%20passing-brightgreen)](tests/)
 
-附带本地模型代理（systemd 用户服务）：GPT/GLM 任一类额度耗尽（503）时，
-自动将 Codex 的 API 请求切换到另一类模型，主模型无感恢复。详见
-[模型代理说明](docs/model-proxy.md)。
+Codex 多模型任务路由与故障恢复插件。当 GPT 或 GLM 任一类模型额度耗尽时，自动切换到另一类继续服务，主对话上下文不丢失。
 
-安装并启用后，可以直接在 Codex 对话中提交任务、查看进度、取消和恢复，
-无需用户打开终端运行脚本。模型分工和候选顺序由个人配置控制。
+```mermaid
+flowchart LR
+    U[用户] --> C[Codex]
+    C --> P[本地代理]
+    P -->|GPT 类正常| G[GPT]
+    P -->|GPT 503| L[GLM]
+    P -->|GLM 503| G
+    C --> M[task-router MCP]
+    M --> B[后台控制器]
+    B -->|讨论| G
+    B -->|编码| L
+```
 
-## 在对话中使用
+## Quick Start
 
-首次安装或升级后，新开一个 Codex 对话，让新版 skill 和工具加载。可以直接说：
+### 方式一：Codex 插件安装（推荐）
 
-- “用 task-router 分析这个项目的架构，先不要改代码。”
-- “用 task-router 修复这个函数，并运行相关测试。”
-- “刚才的任务做到哪了？”
-- “取消刚才的任务。”
-- “继续之前保存的任务。”
+```bash
+codex plugin marketplace add https://github.com/fengbochao/task-router.git
+codex plugin add task-router@fengbochao-plugins
+```
 
-Codex 负责理解任务类型和项目目录，并调用插件工具。用户不需要填写内部
-task_type、任务编号或终端命令。首次调用有副作用的工具时，Codex 可能在界面
-请求授权，可在界面确认；插件不会绕过这一步。
+安装后新开一个 Codex 对话即可使用。
 
-提交成功不代表任务完成，前台会通过等待/查询工具取得最终结果。已提交的
-任务由独立后台进程执行，前台工具连接关闭后也能继续保存结果。
+### 方式二：完整安装（含模型代理）
 
-## 内置工具
+```bash
+git clone https://github.com/fengbochao/task-router.git ~/task-router
+cd ~/task-router && ./install.sh
+```
+
+这会同时安装插件和可选的模型代理服务（systemd 用户服务）。
+
+### 验证安装
+
+在 Codex 对话中说：
+
+```text
+用 task-router 诊断一下配置
+```
+
+或者从终端运行：
+
+```bash
+codex plugin list --marketplace fengbochao-plugins --json
+```
+
+## 功能
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| 对话内任务提交 | ✅ | 通过 MCP 工具，无需终端命令 |
+| 按任务类型路由模型 | ✅ | 讨论优先 GPT，编码优先 GLM |
+| 家族级故障切换 | ✅ | 503 = 整类额度耗尽，自动切另一类 |
+| 主模型无感恢复 | ✅ | 代理透明改写，上下文完整保留 |
+| 后台任务持久化 | ✅ | SQLite 存储，进程重启不丢 |
+| 模型身份提示 | ✅ | 切换后模型如实报告实际身份 |
+| 流式中断收敛 | ✅ | 短冷却 + Codex 内建重试 |
+| 429 限流处理 | ✅ | 透传不冷却，Codex 自动退避 |
+
+## 模型分工
+
+| 任务类型 | 默认首选 | 备选链 |
+|---|---|---|
+| 普通讨论 | gpt-5.5 | gpt-5.6-sol → glm-5.3 |
+| 方案规划、深度分析 | gpt-6-astra | gpt-5.6-sol → glm-5.3 |
+| 代码审查 | glm-5.3 | glm-5.2 → glm-5.3-flash |
+| 编码、重构、测试 | glm-5.3 | glm-5.2 → glm-5.3-flash |
+| 读代码、机械小改 | glm-5.3 | glm-5.2 → glm-5.3-flash |
+
+修改 `~/.config/task-router/routing.json` 即可调整分工，无需改代码。详见[配置参考](plugins/task-router/skills/task-router/references/routing-schema.md)。
+
+## 使用方式
+
+安装并新开对话后，直接说：
+
+- "用 task-router 分析这个项目的架构，先不要改代码。"
+- "用 task-router 修复这个函数，并运行相关测试。"
+- "刚才的任务做到哪了？"
+- "取消任务" / "继续之前的任务"
+
+内置工具：
 
 | 工具 | 作用 |
 |---|---|
-| task_submit | 保存并启动任务，返回编号 |
-| task_status | 查询任务、列出最近任务、分页读取长结果 |
-| task_wait | 有界等待进度或完成结果 |
-| task_cancel | 请求取消，之后确认最终状态 |
-| task_resume | 继续可恢复任务；成功任务不重复执行 |
-| router_diagnose | 检查配置来源、模型分工和可用性证据 |
+| `task_submit` | 提交并启动后台任务 |
+| `task_status` | 查询状态、分页读取长结果 |
+| `task_wait` | 有界等待完成 |
+| `task_cancel` | 请求取消 |
+| `task_resume` | 恢复可重试任务 |
+| `router_diagnose` | 诊断配置和模型选择 |
 
-这些工具由 Codex 自动启动的 MCP 服务提供，后台控制器和路由解析器都在插件包内。
-不依赖源码仓库位于作者机器上的路径，也不需要用户手动启动服务。
+## 环境要求
 
-## 默认模型分工
+| 组件 | 最低版本 | 说明 |
+|---|---|---|
+| Python | 3.11 | 标准库实现，无额外依赖 |
+| Codex CLI | 0.154.0 | 需要 app-server 和 plugin 支持 |
+| OS | Linux | 当前唯一验证平台 |
+| API | OpenAI 兼容 | 需要 GPT 和 GLM 两类模型 |
 
-| 工作 | 默认首选 |
+缺少 MCP SDK 时，插件自动在私有环境安装 `mcp==1.27.0`，不影响全局 Python。
+
+## 模型代理（可选但推荐）
+
+代理运行在 Codex 与 API 之间，是解决主模型 503 的关键层：
+
+```bash
+# 查看状态
+systemctl --user status task-router-proxy
+
+# 查看实时路由日志
+tail -f ~/.local/state/task-router/proxy-access.jsonl
+
+# 查看冷却状态
+cat ~/.local/state/task-router/proxy-state.json
+```
+
+| 故障类型 | 代理行为 |
 |---|---|
-| 普通讨论 | gpt-5.5 |
-| 方案规划、深度分析 | gpt-6-astra |
-| 代码审查 | gpt-5.5 |
-| 编码、重构、测试 | glm-5.3 |
-| 读代码、机械小改 | glm-5.3-flash |
+| 503（额度耗尽） | 冷却该类 600s，立即切另一类 |
+| 429（限流） | 透传，Codex 自动退避重试 |
+| 流式中断 | 冷却该类 120s，Codex 重试时自动切换 |
+| 两类同时耗尽 | 返回真实错误，等待恢复 |
 
-每个角色可以有多个候选。默认策略是讨论优先 GPT、编码优先 GLM；这些是可配置
-偏好，不是性能排名，也不是每个使用者都有相同模型权限的保证。
+详细说明见[模型代理文档](docs/model-proxy.md)。
 
-个人配置位于 ~/.config/task-router/routing.json，支持 XDG_CONFIG_HOME。
-升级保留已有有效配置；旧配置备份后迁移。模型名或排序改变，只需调整个人
-配置，也可以让 Codex 帮助修改。字段见
-[配置参考](plugins/task-router/skills/task-router/references/routing-schema.md)。
+## 故障排查
 
-## 安装与环境
+| 症状 | 检查 | 解决 |
+|---|---|---|
+| 模型自称不是你选的 | `tail -1 proxy-access.jsonl` | 这是代理切换，`model_out` 是实际模型 |
+| 503 反复出现 | `cat proxy-state.json` | 检查是否两类同时冷却 |
+| 工具未加载 | 新开对话 | 安装/升级后必须新开线程 |
+| MCP 启动失败 | `codex plugin list` | 确认插件已启用；检查 Python 版本 |
 
-在 Codex 插件界面安装并启用 task-router；已有使用者升级后新开对话。
-分享时使用插件界面的分享入口。维护者保留安装脚本和开发 CLI，日常使用者
-无需通过它们提交任务。
+## 开发
 
-环境需要 Python 3.11+、可用的 Codex CLI，以及自己的 API/provider 配置。
-CLI 由插件在后台调用。缺少 MCP SDK 时，启动器自动尝试准备私有环境并安装
-固定版本 SDK，不修改全局 Python；首次准备依赖需要网络，失败会显示启动错误。
+```bash
+git clone https://github.com/fengbochao/task-router.git
+cd task-router
+python3 -B -m unittest discover -s tests -q
+```
 
-插件不包含 API 密钥。默认转发已存在的 SUB2API_API_KEY、OPENAI_API_KEY 等变量；
-其他凭据变量需要相应配置转发，不能把密钥写入分享包。
+详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-本轮验证针对 Linux、codex-cli 0.154.0。启动器根据已启用插件的 marketplace
-信息定位安装缓存，不使用固定机器路径。多个同名安装会明确报错，避免运行
-错误副本。其他系统和 CLI 版本仍需实际验证。
+## 文档
 
-## 恢复边界
+- [模型代理](docs/model-proxy.md) - 故障切换原理和运维命令
+- [对话入口验证](docs/v0.5-validation.md) - v0.5 完整测试记录
+- [候选模型验证](docs/model-check-20260914.md) - 7 个模型实测结果
+- [控制器设计](docs/controller-design.md) - 架构决策记录
+- [配置参考](plugins/task-router/skills/task-router/references/routing-schema.md)
 
-后台程序保存任务并管理候选、尝试次数和时间预算。对确认结束的可重试服务
-故障选择下一候选。取消请求、超时或断线不自动等于旧执行已经停止。
+## License
 
-不明确的执行会标为 unknown，阻止盲目重放；可恢复检查点保留工作区占用。
-成功任务再次恢复只返回结果，不重新执行。
-
-MCP 入口不接受任意主机验证命令，依赖 worker 在受限环境中的验证报告和前台
-审查。completion_verified=false 不应被误报为独立程序验证通过。开发 CLI
-保留使用者明确指定验证命令的能力。
-
-主模型必须先提交任务。如果它在提交之前就失效，后台没有收到这条请求，
-无法恢复它。插件没有拦截所有 API 请求，也不能保证主模型每次都选择此
-skill；明确说“用 task-router”可以确定工作流意图。
-
-尚未实现余额监控或持久化模型冷却。全部候选不可用时明确停止，认证错误、
-额度不足和服务 503 不能一概视为同一种故障。
-
-## 开发与验证资料
-
-- [v0.5 对话入口验证](docs/v0.5-validation.md)
-- [独立控制器及开发 CLI](docs/controller-prototype.md)
-- [候选模型验证](docs/model-check-20260914.md)
-- [后续调度设计](docs/controller-design.md)
-
-仓库是唯一维护源，安装目录和缓存是派生产物。旧开发脚本保留兼容入口，
-真正的运行代码位于 plugins/task-router/scripts/，插件可以独立分发。
+[MIT](LICENSE)
