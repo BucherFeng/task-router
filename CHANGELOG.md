@@ -2,19 +2,13 @@
 
 ## [1.0.1] - 2026-09-18
 
-### Changed
-
-- English-only documentation, plugin starter prompts, and repository text checks.
-- Focused documentation for the current installation, routing, and execution paths.
-
-### Removed
-
-- Superseded prototype documents, dated validation snapshots, and repository-level runtime wrappers.
-- Unused proxy helpers, constants, installer fields, return values, and test imports.
-
 ### Fixed
 
 - Detect prematurely closed fixed-length upstream responses before marking the downstream response complete.
+
+### Changed
+
+- Developer task commands use the plugin's packaged runtime entry point.
 
 ## [1.0.0] - 2026-09-18
 

@@ -56,21 +56,24 @@ execution paths. Credentials and live model requests are not needed by the suite
 
 ## Commit messages
 
-Use Conventional Commits:
+Use Conventional Commits and describe the concrete behavior or technical change:
 
 ```text
 feat: add stream drop cooldown
 fix: stop treating 429 as family exhaustion
 docs: update proxy troubleshooting
-refactor: extract rewrite helper
+refactor: simplify installer rollback state
 test: add 429 regression
 ```
+
+Keep subjects focused on the change. Describe installation, routing, recovery,
+configuration, or documentation updates rather than the editing process.
 
 ## Releases
 
 1. Update `CHANGELOG.md`, the plugin manifest, and installer version consistently.
 2. Update version fixtures and run the complete test suite.
-3. Check repository text and decoded JSON strings for English-only content.
+3. Validate repository text, decoded strings, and documentation links.
 4. Commit, create a new version tag, and push the branch and tag after checks pass.
 5. Create a GitHub Release with the matching changelog entry, full source archives,
    and SHA-256 checksums. Preserve previously published tags and release artifacts.
