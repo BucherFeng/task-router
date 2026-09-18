@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "plugins/task-router/scripts"))
 from task_router_runtime.codex_adapter import CodexAdapter, error_kind, safe_message
 from task_router_runtime.store import process_present
 

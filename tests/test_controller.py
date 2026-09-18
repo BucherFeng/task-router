@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "plugins/task-router/scripts"))
 sys.path.insert(0, str(ROOT / "plugins/task-router/skills/task-router/scripts"))
 from router_core import choose, digest
 from task_router_runtime.controller import Controller, outcome
@@ -275,7 +275,7 @@ class RunnerCommandTests(unittest.TestCase):
             workspace.mkdir()
             policy_path = root / "routing.json"
             policy_path.write_text(json.dumps(config()))
-            command = [sys.executable, "-B", str(ROOT / "scripts/run_task.py"), "--state-dir", str(root / "state")]
+            command = [sys.executable, "-B", str(ROOT / "plugins/task-router/scripts/run_task.py"), "--state-dir", str(root / "state")]
             submitted = subprocess.run(command + ["submit", "--task", "edit", "--cwd", str(workspace),
                                                   "--config", str(policy_path), "--write", "--prompt", "test"],
                                        capture_output=True, text=True)
@@ -300,7 +300,7 @@ class ProcessRecoveryTests(unittest.TestCase):
         environment = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ.get("PATH", ""),
                        "TASK_ROUTER_FAKE_SCENARIO": scenario, "TASK_ROUTER_FAKE_LOG": str(self.log),
                        "PYTHONDONTWRITEBYTECODE": "1"}
-        return [sys.executable, "-B", str(ROOT / "scripts/run_task.py"), "--state-dir", str(self.directory)], environment
+        return [sys.executable, "-B", str(ROOT / "plugins/task-router/scripts/run_task.py"), "--state-dir", str(self.directory)], environment
 
     def test_cli_restart_continues_partial_write_and_does_not_repeat_success(self):
         task = self.submit(verify=[sys.executable, "-c", "from pathlib import Path; assert Path('progress.txt').read_text() == 'step one\\nstep two\\n'"])

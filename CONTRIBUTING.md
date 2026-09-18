@@ -26,7 +26,7 @@ plugins/task-router/       插件源码（分发单元）
   scripts/                 MCP 服务、后台执行器、控制器
 scripts/                   安装器、模型代理（独立于插件分发）
 tests/                     全部测试
-docs/                      设计文档和验证记录
+docs/                      当前运行结构与代理运维说明
 ```
 
 ## 测试
@@ -40,6 +40,14 @@ python3 -B -m unittest discover -s tests -q
 - 路由和配置测试不需要网络。
 - MCP 集成测试需要 `mcp` SDK（`pip install mcp==1.27.0`）。
 - 模型代理测试绑定本地回环端口。
+
+开发时可直接调用插件内的任务入口：
+
+```bash
+python3 plugins/task-router/scripts/run_task.py --help
+```
+
+测试直接导入插件包内的运行代码，与安装后的执行路径保持一致。
 
 ## 提交规范
 

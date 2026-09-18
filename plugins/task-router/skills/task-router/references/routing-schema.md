@@ -1,6 +1,6 @@
 # Routing configuration v2
 
-In plugin v0.5, normal submission and lifecycle operations use the MCP
+Normal submission and lifecycle operations use the MCP
 conversation tools. Commands below are developer/configuration diagnostics;
 do not ask users to run them to submit ordinary work. The background controller
 manages retries; the host still interprets and submits requests.
@@ -44,8 +44,8 @@ keys, missing references and wrong types are errors.
   its actual attempts and enforces the limit. A direct resolver invocation only
   checks the caller's --attempt value; the resolver does not execute tasks.
 
-Bundled role preferences are GPT for discussion/reasoning/review and GLM for
-code tasks. These are configurable preferences, not benchmark rankings.
+Bundled role preferences are GPT for discussion/reasoning and GLM for review,
+code reading, editing and tests. These are configurable preferences, not benchmark rankings.
 Profiles are candidates; enabled does not imply tested or available.
 
 ## Selection and diagnostics
@@ -77,7 +77,7 @@ resolve; it is not proof that spawning will succeed.
 Exit codes: 0 success/inline or diagnostic report; 2 invalid input/configuration;
 3 no compatible candidate or exhausted attempt budget. --doctor's status can
 be attention with exit 0: inspect notes and routes rather than just exit code.
---list now outputs JSON. --failover requires --for-task because candidate pools
+--list outputs JSON. --failover requires --for-task because candidate pools
 belong to roles, and returns the next choice and the remaining eligible chain.
 
 ## Runtime evidence

@@ -1,91 +1,103 @@
-# 模型代理（家族级故障切换）
+# 模型代理
 
-日期：2026-09-17。对应组件：scripts/model_proxy.py，systemd 用户服务
-task-router-proxy.service。
+模型代理为经过本地地址的 Codex API 请求提供 GPT/GLM 家族切换、冷却状态保存
+和路由日志。实现位于 `scripts/model_proxy.py`，完整安装由 `scripts/proxy_install.py` 部署。
 
-## 解决什么问题
+## 完整安装
 
-账号的额度按家族计：GPT 类与 GLM 类各自共享额度。任何一个模型返回 503，
-即代表该类额度耗尽，同类其他模型也不会可用。Codex 主模型自身的 API 请求
-无法由插件拦截——插件运行在主模型回合内部。代理位于 Codex 与上游 API 之间，
-在网络层拦截请求，主模型 503 时自动改写为另一类模型重发，对 Codex 完全透明。
+在仓库根目录运行：
 
-## 工作方式
+```bash
+./install.sh
+```
 
-Codex 的 base_url 指向 127.0.0.1:8787（本地代理）。代理读取请求 JSON 中的
-model 字段并判断家族：
+安装器读取当前 Codex provider 的 API 地址，部署代理和 `task-router-proxy.service`，
+验证本次服务实例的健康状态后再切换 `base_url`。原始 API 路径、密钥环境变量引用
+以及其他 provider 设置得到保留；安装前配置另存备份。
 
-- 该家族处于冷却期（此前发生过家族级失败）：直接改写为另一类的首选模型
-  （GLM 耗尽 -> gpt-6-astra；GPT 耗尽 -> glm-5.3），不再请求已耗尽的类。
-- 否则原样转发。上游返回 502/503 时：将该家族加入冷却（默认 600 秒），
-  改写为另一类首选并重发一次。
-- 429 默认按临时限流处理：原样透传，不改写模型、不冷却家族，由 Codex
-  自带的退避重试恢复。这与账号语义一致——额度耗尽表现为 503，而 429 是
-  短时速率限制。如需恢复旧行为，可通过 --fail-status 显式加入 429。
-- 重发也失败：将另一类也加入冷却，并把第二次的错误原样返回给 Codex。
-- 两类同时冷却：所有请求直接得到明确错误，等待冷却结束或额度恢复。
+可指定监听端口和跨家族目标：
 
-冷却状态持久化在 ~/.local/state/task-router/proxy-state.json，代理重启不会
-丢失。成功重试不会冷却备选家族——只有仍然失败的家族才进入冷却。
+```bash
+./install.sh --proxy-port 8787 \
+  --glm-fallback gpt-6-astra \
+  --gpt-fallback glm-5.3
+```
 
-非 JSON 请求体、无法识别家族的模型、以及 /v1/models 等无 model 字段的请求
-按原样透传，不做改写。流式（SSE）响应在收到错误状态且未开始输出前可以
-安全重试；一旦开始输出则原样透传，中断无法透明重放，这与所有代理方案一致。
+`--glm-fallback` 指定 GLM 家族不可用时使用的 GPT 模型；`--gpt-fallback` 指定
+GPT 家族不可用时使用的 GLM 模型。完整安装采用 HTTP Responses 接口，并关闭
+所选 provider 的 WebSocket 传输，以使请求经过本地 HTTP 代理。
 
-### 流式中断的收敛
+## 路由行为
 
-上游已经开始输出后连接中断时，代理无法重放该响应，但会把该家族加入
-短冷却（默认 120 秒，--stream-drop-cooldown 可调），并在访问日志中记录
-result=upstream_stream_drop。Codex 对流断开有内建重试；重试请求再次经过
-代理时会被直接改写到另一类，因此大多数中断对用户表现为一次自动恢复，
-而不是反复撞同一类已故障的模型。
+完整安装的预设适用于“HTTP 503 表示某个模型家族额度耗尽”的 API 服务。
 
-### 模型身份提示
+| 请求情况 | 处理方式 |
+|---|---|
+| 请求家族正常 | 使用原始模型转发请求 |
+| 收到配置中的家族故障状态码 | 冷却该家族，在响应输出前尝试另一个未冷却家族 |
+| 请求家族已冷却、另一家族可用 | 直接改写为另一个家族的目标模型 |
+| 429 限流 | 透传响应，供调用方退避重试 |
+| 读取上游响应发生异常 | 记录异常，并对该请求实际目标家族设置短冷却 |
+| 候选家族也处于冷却期 | 保留当前上游响应，不循环重试候选 |
+| 请求没有可识别的模型家族 | 原样转发 |
 
-发生改写时，代理会在请求 instructions 末尾追加一条事实说明：请求的原始
-模型不可用、本次响应实际由哪个模型生成、被问及时应如实回答。这样模型
-自述与真实路由一致。--no-announce-model-rewrite 可关闭该行为（仍会改写
-模型，但不追加提示）。
+完整安装指定家族故障码为 `503`、冷却时间为 600 秒；独立启动代理时可通过
+`--fail-status` 和 `--cooldown-seconds` 配置。直接运行代理 CLI 的默认故障码为
+`502,503`。上游读取异常的短冷却默认 120 秒，由 `--stream-drop-cooldown` 控制。
 
-Codex 界面左上/会话标签显示的仍是用户选择的模型，这是 Codex 会话元数据，
-代理无法修改；真实路由以 proxy-access.jsonl 的 model_in/model_out 为准。
+代理转发请求携带的上下文和工具信息。已开始输出的响应发生异常时，代理关闭
+该响应并记录状态；调用方后续重试可以使用更新后的家族选择。
 
-## 当前部署
+## 服务与文件
 
-- 服务：systemd 用户单元 task-router-proxy.service（崩溃自动重启、开机自启）。
-- 监听：127.0.0.1:8787；上游：https://api.infiniplan.xyz。
-- 降级方向：GLM 耗尽 -> gpt-6-astra；GPT 耗尽 -> glm-5.3。
-- Codex config.toml 的 base_url 已切换为 http://127.0.0.1:8787/v1，原配置
-  备份于 config.toml.before-proxy-20260917。
+| 路径 | 用途 |
+|---|---|
+| `~/.local/share/task-router/model_proxy.py` | 完整安装部署的代理程序 |
+| `~/.config/systemd/user/task-router-proxy.service` | systemd 用户服务单元 |
+| `~/.local/state/task-router/original-base-url` | 保存的原始上游地址 |
+| `~/.local/state/task-router/proxy-install.json` | provider、代理地址和配置备份位置 |
+| `~/.local/state/task-router/proxy-state.json` | 家族冷却状态 |
+| `~/.local/state/task-router/proxy-access.jsonl` | 请求路由日志 |
 
-## 常用操作
+服务随用户 systemd 会话启动，异常退出后自动重启。冷却状态在重启后继续使用。
+监听地址为本地回环地址，默认端口为 `8787`。
 
-~~~bash
-systemctl --user status task-router-proxy      # 查看服务状态
-systemctl --user restart task-router-proxy     # 重启（冷却状态保留）
-curl -sS http://127.0.0.1:8787/health          # 健康检查
-cat ~/.local/state/task-router/proxy-state.json  # 查看当前冷却
-tail -f ~/.local/state/task-router/proxy-access.jsonl  # 观察每次请求的模型改写
-~~~
+```bash
+systemctl --user status task-router-proxy
+systemctl --user restart task-router-proxy
+curl -sS http://127.0.0.1:8787/health
+tail -f ~/.local/state/task-router/proxy-access.jsonl
+```
 
-回退直连：将 config.toml 的 base_url 改回 https://api.infiniplan.xyz/v1，
-然后 systemctl --user disable --now task-router-proxy（可选）。
+## 观察模型选择
 
-## 验证记录
+访问日志记录 `model_in`、`model_out`、`upstream_status` 和 `result`。
+`model_in` 是原始请求模型；非空的 `model_out` 是代理改写后的目标，为空表示沿用
+原始模型。状态码用于判断最终上游响应是否成功。
 
-- 13 项本地 socket 测试通过（假上游）：按类切换、冷却跳过与过期、双类
-  耗尽透传、SSE 流式保序透传、非 JSON 透传、未知家族不改写、状态持久化、
-  健康检查；另有成功重试不冷却备选家族、访问日志记录改写且不含凭据的
-  回归测试。
-- 真实验证：/v1/models 透传返回真实模型列表；glm-5.3-flash 真实请求经代理
-  正常返回；codex exec 端到端（含流式）经代理完成并返回 PROXY-E2E-OK。
-- 未验证：上游真实 503 的在线注入（需要真实耗尽场景）；macOS/WSL；Codex
-  CLI 升级后的协议兼容性。
+| `result` | 含义 |
+|---|---|
+| `passthrough` | 原样转发 |
+| `family_failover` | 家族故障后尝试跨类请求 |
+| `rewritten_family_cooldown` | 根据冷却状态直接改写请求 |
+| `rate_limit_passthrough` | 透传首次上游响应的限流状态 |
+| `fallback_family_also_cooling` | 候选家族也在冷却中 |
+| `upstream_stream_drop` | 读取上游响应发生异常 |
 
-2026-09-18 修正：GPT 额度耗尽后切换到 GLM 的首波请求曾因并发触发 429，
-旧逻辑将 429 误判为家族额度耗尽，导致两类同时冷却、全部请求 503。已改为
-429 透传不冷却，并清除了当时的错误冷却状态。修正后实测：gpt-6 请求经代理
-自动由 glm-5.3 完成，返回 200 及 X-Task-Router-Failover 头。
+改写响应包含 `X-Task-Router-Failover` 头。代理也可在请求 `instructions` 中追加
+目标模型提示，帮助解释路由；`--no-announce-model-rewrite` 用于关闭此提示。
+界面中的会话型号是用户选择的模型，路由日志记录代理实际发送的目标。
 
-注意：503 被视为家族额度耗尽是当前账号的运维结论；若未来供应商改为按单
-模型计费，需重新评估家族级冷却语义。
+## 更新与恢复连接
+
+重新运行完整安装会更新代理程序，保留个人路由配置，并使用保存的上游地址。
+迁移已有手动代理时，通过 `--upstream` 提供原始 API base URL。
+
+需要恢复直连时，读取 `proxy-install.json` 中的 `provider` 和 `upstream`，将对应
+provider 的 `base_url` 恢复为原始值，然后重新启动 Codex。确认使用直连后，可执行：
+
+```bash
+systemctl --user disable --now task-router-proxy
+```
+
+保留的配置备份可用于核对原始连接设置。开发和测试方式见 [CONTRIBUTING](../CONTRIBUTING.md)。

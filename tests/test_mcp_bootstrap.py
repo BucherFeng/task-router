@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/task-router"
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(PLUGIN / "scripts"))
 from task_router_runtime.service import public_report, worker_guard
 from task_router_runtime.store import StateError
 

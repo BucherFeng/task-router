@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone task-router prototype: submit, run, inspect, cancel, and resume."""
+"""Task Router developer CLI: submit, run, inspect, cancel, and resume."""
 
 import argparse
 import json

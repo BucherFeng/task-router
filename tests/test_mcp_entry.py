@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/task-router"
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(PLUGIN / "scripts"))
 from task_router_runtime.store import Store
 
 try:

@@ -5,18 +5,6 @@
 
 Codex 多模型任务路由与故障恢复系统。在 Codex 对话中按任务类型分配模型，并通过本地代理在 GPT/GLM 家族之间切换，转发当前请求携带的对话内容与工具信息。
 
-```mermaid
-flowchart LR
-    U[用户] --> C[Codex]
-    C --> P[本地模型代理]
-    P -->|按家族切换| G[GPT 模型]
-    P -->|按家族切换| L[GLM 模型]
-    C --> M[task-router 插件]
-    M --> B[后台任务控制器]
-    B --> G
-    B --> L
-```
-
 ## 安装
 
 ### 完整安装（推荐）
@@ -132,8 +120,7 @@ cat ~/.local/state/task-router/proxy-state.json
 
 - [配置参考](plugins/task-router/skills/task-router/references/routing-schema.md)
 - [模型代理](docs/model-proxy.md)
-- [候选模型验证](docs/model-check-20260914.md)
-- [控制器架构](docs/controller-design.md)
+- [运行结构](docs/architecture.md)
 - [CONTRIBUTING](CONTRIBUTING.md)
 - [CHANGELOG](CHANGELOG.md)
 
