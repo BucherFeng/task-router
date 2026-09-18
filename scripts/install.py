@@ -23,7 +23,7 @@ from typing import Any
 PLUGIN_NAME = "task-router"
 EXPECTED_MARKETPLACE_NAME = "fengbochao-plugins"
 EXPECTED_SOURCE_PATH = "./plugins/task-router"
-REQUIRED_VERSION = "0.5.0"
+REQUIRED_VERSION = "1.0.0"
 MCP_CONFIG_DEFAULT = "./.mcp.json"
 MCP_REQUIRED_PATHS = (
     "scripts/bootstrap_mcp.py",

@@ -1,6 +1,6 @@
 {
   "name": "task-router",
-  "version": "0.5.0+codex.20260914115844",
+  "version": "1.0.0",
   "description": "Managed model routing from Codex conversation with background execution and durable task status",
   "author": {
     "name": "fengbochao"

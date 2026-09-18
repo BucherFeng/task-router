@@ -24,11 +24,11 @@ class LauncherTests(unittest.TestCase):
             codex = home / ".codex"
             codex.mkdir()
             (codex / "config.toml").write_text('[plugins."task-router@team-local"]\nenabled = true\n')
-            entry = codex / "plugins/cache/team-local/task-router/0.5.0/scripts/bootstrap_mcp.py"
+            entry = codex / "plugins/cache/team-local/task-router/1.0.0/scripts/bootstrap_mcp.py"
             entry.parent.mkdir(parents=True)
             entry.write_text("# fixture")
             response = SimpleNamespace(returncode=0, stdout=json.dumps({"installed": [
-                {"name": "task-router", "marketplaceName": "team-local", "version": "0.5.0", "enabled": True}]}))
+                {"name": "task-router", "marketplaceName": "team-local", "version": "1.0.0", "enabled": True}]}))
             with patch("pathlib.Path.home", return_value=home), patch("os.environ", {}), \
                     patch("subprocess.run", return_value=response) as call, patch("runpy.run_path") as run:
                 exec(compile(code, "plugin-launcher", "exec"), {})
@@ -40,7 +40,7 @@ class LauncherTests(unittest.TestCase):
     def test_launcher_rejects_traversal_in_installation_metadata(self):
         code = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["task-router"]["args"][-1]
         response = SimpleNamespace(returncode=0, stdout=json.dumps({"installed": [
-            {"name": "task-router", "marketplaceName": "..", "version": "0.5.0", "enabled": True}]}))
+            {"name": "task-router", "marketplaceName": "..", "version": "1.0.0", "enabled": True}]}))
         with tempfile.TemporaryDirectory() as directory, patch("pathlib.Path.home", return_value=Path(directory)), \
                 patch("os.environ", {"TASK_ROUTER_MARKETPLACE": "team"}), patch("subprocess.run", return_value=response), \
                 patch("runpy.run_path") as run, self.assertRaises(RuntimeError):

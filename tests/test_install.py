@@ -28,7 +28,7 @@ V2 = {
 
 SOURCE_MANIFEST = {
     "name": PLUGIN,
-    "version": "0.5.0",
+    "version": "1.0.0",
     "skills": "./skills/",
 }
 
@@ -254,7 +254,7 @@ class InstallerTests(unittest.TestCase):
         manifest = json.loads(
             (self.home / "plugins" / PLUGIN / ".codex-plugin" / "plugin.json").read_text()
         )
-        self.assertTrue(manifest["version"].startswith("0.5.0+codex."))
+        self.assertTrue(manifest["version"].startswith("1.0.0+codex."))
         backups = list((self.home / "plugins/.task-router-backups").glob("task-router.backup.*"))
         self.assertEqual(len(backups), 1)
         self.assertIn("version", json.loads(backups[0].joinpath("skills", PLUGIN, "routing.json").read_text()))
