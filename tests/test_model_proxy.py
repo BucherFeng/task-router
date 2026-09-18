@@ -186,6 +186,22 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.upstream_requests, ["glm-5.3", "gpt-6-astra"])
         self.assertEqual(self.access_log()[0]["result"], "upstream_stream_drop")
 
+    def test_429_passthrough_does_not_cool_or_switch_by_default(self):
+        self.upstream.logic = lambda model: (429, "slow down", "application/json")
+        port, state_file = self.start_proxy(fail_statuses="502,503")
+        status, _, _ = self.request(port, model="glm-5.3")
+        self.assertEqual(status, 429)
+        self.assertEqual(self.upstream_requests, ["glm-5.3"])
+        if state_file.exists():
+            self.assertEqual(json.loads(state_file.read_text())["families"], {})
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            entries = self.access_log()
+            if entries:
+                break
+            time.sleep(0.02)
+        self.assertEqual(entries[0]["result"], "rate_limit_passthrough")
+
     def test_cooldown_skips_dead_family_without_upstream_retry(self):
         self.upstream.logic = lambda model: (
             (503, "glm overloaded", "application/json")

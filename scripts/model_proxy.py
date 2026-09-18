@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 DEFAULT_UPSTREAM = "https://api.infiniplan.xyz"
 DEFAULT_LISTEN = "127.0.0.1:8787"
 DEFAULT_COOLDOWN = 600
-DEFAULT_FAIL_STATUS = {429, 502, 503}
+DEFAULT_FAIL_STATUS = {502, 503}
 STREAM_CHUNK = 8192
 MAX_BODY = 64 * 1024 * 1024
 MAX_ERROR_BODY = 1024 * 1024
@@ -297,6 +297,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             conn, response = self._upstream_request(self.command, self.path, attempt_body)
             failover_note = None
+            if response.status == 429 and response.status not in cfg.fail_statuses:
+                log_entry["result"] = "rate_limit_passthrough"
             if response.status in cfg.fail_statuses and family:
                 if not substitute:
                     cfg.state.cool_family(family)
@@ -367,8 +369,9 @@ def main():
     parser.add_argument("--gpt-fallback", default="glm-5.3",
                         help="model used when the GPT family is exhausted")
     parser.add_argument("--cooldown-seconds", type=int, default=DEFAULT_COOLDOWN)
-    parser.add_argument("--fail-status", default="429,502,503",
-                        help="comma-separated HTTP statuses treated as family failures")
+    parser.add_argument("--fail-status", default="502,503",
+                        help="comma-separated HTTP statuses treated as family failures; "
+                             "429 is passed through by default so Codex can back off")
     parser.add_argument("--state-file",
                         default=str(Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
                                        / "task-router/proxy-state.json"))
