@@ -86,6 +86,7 @@ class ProxyTests(unittest.TestCase):
         threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
         self.upstream_port = self.upstream.server_address[1]
         self.addCleanup(self.upstream.server_close)
+        self.addCleanup(self.upstream.shutdown)
 
     def upstream_logic(self, model):
         raise NotImplementedError
@@ -104,7 +105,18 @@ class ProxyTests(unittest.TestCase):
         return server.server_address[1], state
 
     def access_log(self):
-        return [json.loads(line) for line in (self.root / "proxy-access.jsonl").read_text().splitlines()]
+        # The response's final chunk can reach the client before the handler logs completion.
+        deadline = time.monotonic() + 2
+        path = self.root / "proxy-access.jsonl"
+        while time.monotonic() < deadline:
+            try:
+                entries = [json.loads(line) for line in path.read_text().splitlines()]
+                if entries:
+                    return entries
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+            time.sleep(0.01)
+        self.fail("proxy did not record request completion")
 
     def request(self, port, model="glm-5.3", body=None, method="POST"):
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -112,9 +124,12 @@ class ProxyTests(unittest.TestCase):
             body = json.dumps({"model": model, "input": "ping"})
         connection.request(method, "/v1/responses", body=body,
                            headers={"Authorization": "Bearer test", "Content-Type": "application/json"})
-        response = connection.getresponse()
-        data = response.read()
-        return response.status, data, dict(response.getheaders())
+        try:
+            response = connection.getresponse()
+            data = response.read()
+            return response.status, data, dict(response.getheaders())
+        finally:
+            connection.close()
 
     def test_503_switches_family_and_cooldowns_it(self):
         self.upstream.logic = lambda model: (
@@ -293,6 +308,7 @@ class ProxyTests(unittest.TestCase):
         response = connection.getresponse()
         self.assertEqual(response.status, 200)
         self.assertIn(b'"status": "ok"', response.read())
+        connection.close()
 
 
 class CooldownStateTests(unittest.TestCase):

@@ -204,6 +204,7 @@ class InstallerTests(unittest.TestCase):
             [
                 sys.executable,
                 str(INSTALLER),
+                "--plugin-only",
                 "--home",
                 str(self.home),
                 "--source-repo",

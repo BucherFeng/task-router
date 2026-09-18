@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import os
@@ -12,23 +11,21 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
 import tempfile
 import uuid
-import urllib.request
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from proxy_install import ProxyDeployment, ProxyInstallError
+
 
 PLUGIN_NAME = "task-router"
 EXPECTED_MARKETPLACE_NAME = "fengbochao-plugins"
 EXPECTED_SOURCE_PATH = "./plugins/task-router"
 REQUIRED_VERSION = "1.0.0"
-PROXY_PORT = 8787
-PROXY_NAME = "task-router-proxy"
 MCP_CONFIG_DEFAULT = "./.mcp.json"
 MCP_REQUIRED_PATHS = (
     "scripts/bootstrap_mcp.py",
@@ -58,6 +55,11 @@ class PreparedConfig:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plugin-only", action="store_true", help="install conversation tools without changing the API connection")
+    parser.add_argument("--proxy-port", type=int, default=8787, help="local loopback port for complete installation")
+    parser.add_argument("--upstream", help="original API base URL when migrating an existing local proxy")
+    parser.add_argument("--glm-fallback", default="gpt-6-astra", help="GPT model used when the GLM family is unavailable")
+    parser.add_argument("--gpt-fallback", default="glm-5.3", help="GLM model used when the GPT family is unavailable")
     parser.add_argument(
         "--home",
         metavar="PATH",
@@ -128,155 +130,6 @@ def reject_symlink(path: Path, description: str) -> None:
             raise InstallError(f"refusing to manage {description} because it is a symlink: {path}")
     except OSError as exc:
         raise InstallError(f"cannot inspect {description}: {path}: {exc}") from exc
-
-
-def read_codex_config(home: Path) -> dict[str, Any]:
-    path = home / ".codex" / "config.toml"
-    if not path.exists():
-        return {}
-    try:
-        with path.open("rb") as stream:
-            return tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise InstallError(f"cannot read Codex config: {path}: {exc}") from exc
-
-
-def backup_file(path: Path, backup_root: Path, label: str) -> Path | None:
-    if not path.exists():
-        return None
-    backup = unique_path(backup_root, f"{label}.backup")
-    shutil.copy2(path, backup)
-    return backup
-
-
-def atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        unlink_owned(Path(tmp))
-        raise
-
-
-def install_proxy(home: Path, repo: Path, backup_root: Path) -> dict[str, Any]:
-    """Deploy the model proxy, systemd service, and switch Codex base_url."""
-    config_path = home / ".codex" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Read existing provider settings before changing anything.
-    codex_config = read_codex_config(home)
-    provider_name = codex_config.get("model_provider")
-    if not isinstance(provider_name, str):
-        raise InstallError("Codex config has no model_provider; configure a provider first")
-    provider_key = f"model_providers.{provider_name}"
-    providers = codex_config.get("model_providers", {})
-    if not isinstance(providers, dict) or provider_name not in providers:
-        raise InstallError(f"Codex config missing provider [{provider_key}]")
-    provider = providers[provider_name]
-    if not isinstance(provider, dict):
-        raise InstallError(f"Codex provider [{provider_key}] is malformed")
-
-    upstream = provider.get("base_url")
-    if not isinstance(upstream, str) or not upstream.strip():
-        raise InstallError(f"Codex provider [{provider_key}] has no base_url")
-    if upstream.startswith(f"http://127.0.0.1:{PROXY_PORT}") or upstream.startswith(f"http://localhost:{PROXY_PORT}"):
-        # Already pointing at our proxy; recover the original from a previous install marker.
-        marker = home / ".local" / "state" / "task-router" / "original-base-url"
-        if marker.is_file():
-            upstream = marker.read_text(encoding="utf-8").strip()
-        else:
-            raise InstallError("base_url already points at the proxy but no original URL marker found")
-
-    # Install proxy script to a stable location.
-    proxy_dir = home / ".local" / "share" / "task-router"
-    proxy_dir.mkdir(parents=True, exist_ok=True)
-    reject_symlink(proxy_dir, "proxy installation directory")
-    proxy_script = proxy_dir / "model_proxy.py"
-    shutil.copy2(repo / "scripts" / "model_proxy.py", proxy_script)
-    proxy_script.chmod(0o755)
-
-    # Write the original upstream URL marker.
-    marker_dir = home / ".local" / "state" / "task-router"
-    marker_dir.mkdir(parents=True, exist_ok=True)
-    marker = marker_dir / "original-base-url"
-    if not marker.exists():
-        marker.write_text(upstream, encoding="utf-8")
-
-    # Write systemd user service.
-    service_dir = home / ".config" / "systemd" / "user"
-    service_dir.mkdir(parents=True, exist_ok=True)
-    service_path = service_dir / f"{PROXY_NAME}.service"
-    service_backup = backup_file(service_path, backup_root, "proxy-service")
-    glm_fallback = "gpt-6-astra"
-    gpt_fallback = "glm-5.3"
-    service_text = (
-        "[Unit]\n"
-        "Description=task-router model proxy (family-aware failover)\n"
-        "After=network-online.target\n\n"
-        "[Service]\n"
-        f"ExecStart=/usr/bin/python3 {proxy_script} --listen 127.0.0.1:{PROXY_PORT} "
-        f"--upstream {upstream} --glm-fallback {glm_fallback} "
-        f"--gpt-fallback {gpt_fallback} --cooldown-seconds 600\n"
-        "Restart=always\n"
-        "RestartSec=2\n\n"
-        "[Install]\n"
-        "WantedBy=default.target\n"
-    )
-    atomic_write(service_path, service_text)
-
-    # Start/restart the proxy.
-    systemctl = shutil.which("systemctl")
-    if not systemctl:
-        raise InstallError("systemctl not found; Linux with systemd user services required")
-    for args in (
-        ["--user", "daemon-reload"],
-        ["--user", "enable", PROXY_NAME],
-        ["--user", "restart", PROXY_NAME],
-    ):
-        run([systemctl, *args], f"systemd {' '.join(args)}")
-
-    # Health check.
-    import time as _time
-    for attempt in range(15):
-        try:
-            req = urllib.request.Request(f"http://127.0.0.1:{PROXY_PORT}/health")
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                if resp.status == 200:
-                    break
-        except OSError:
-            pass
-        _time.sleep(1)
-    else:
-        raise InstallError(f"proxy health check failed after 15s on port {PROXY_PORT}")
-
-    # Backup and switch Codex base_url.
-    config_backup = backup_file(config_path, backup_root, "codex-config")
-    original_text = config_path.read_text(encoding="utf-8")
-    # Replace the base_url line under the provider section.
-    import re as _re
-    pattern = _re.compile(
-        r'(\[model_providers\.' + _re.escape(provider_name) + r'\][^\[]*?base_url\s*=\s*")([^"]+)(")',
-        _re.DOTALL,
-    )
-    new_url = f"http://127.0.0.1:{PROXY_PORT}/v1"
-    if pattern.search(original_text):
-        new_text = pattern.sub(lambda m: m.group(1) + new_url + m.group(3), original_text, count=1)
-    else:
-        raise InstallError(f"could not locate base_url in [{provider_key}]")
-    atomic_write(config_path, new_text)
-
-    return {
-        "upstream": upstream,
-        "proxy_port": PROXY_PORT,
-        "service": str(service_path),
-        "service_backup": str(service_backup) if service_backup else None,
-        "config_backup": str(config_backup) if config_backup else None,
-    }
 
 
 def validate_no_symlinks(root: Path, description: str) -> None:
@@ -674,6 +527,19 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
     personal_exists = personal_marketplace is not None
     marketplace_name = personal_marketplace or repo_marketplace_name
 
+    deployment = None
+    proxy_info = None
+    if not args.plugin_only:
+        systemctl = shutil.which("systemctl")
+        if not sys.platform.startswith("linux") or not systemctl:
+            raise InstallError("complete installation requires Linux and systemd user services")
+        try:
+            deployment = ProxyDeployment(home=home, repo=repo, systemctl=systemctl,
+                port=args.proxy_port, codex_home=(home / ".codex" if explicit_home else os.environ.get("CODEX_HOME")),
+                upstream_override=args.upstream, glm_fallback=args.glm_fallback, gpt_fallback=args.gpt_fallback)
+        except ProxyInstallError as exc:
+            raise InstallError(str(exc)) from exc
+
     destination_parent = destination.parent
     reject_symlink(destination_parent, "plugin parent directory")
     if destination.exists() or destination.is_symlink():
@@ -736,6 +602,8 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
             commit_config(prepared_config, config, backup_root)
 
         register_or_install(personal_exists, repo, marketplace_name)
+        if deployment is not None:
+            proxy_info = deployment.install(backup_root)
     except BaseException as exc:
         recovery_errors = []
         if prepared_config is not None:
@@ -764,16 +632,12 @@ def install(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | 
     print(f"installed {PLUGIN_NAME} {REQUIRED_VERSION}")
     print(f"active user configuration: {config}")
 
-    # Install the proxy after the plugin is in place. Skip in fake-CLI tests.
-    if os.environ.get("TASK_ROUTER_INSTALL_TESTING") != "1":
-        proxy_info = install_proxy(home, repo, backup_root)
+    if proxy_info is not None:
         print(f"model proxy: active on 127.0.0.1:{proxy_info['proxy_port']}")
         print(f"  upstream: {proxy_info['upstream']}")
         print(f"  service: {proxy_info['service']}")
         if proxy_info.get("config_backup"):
             print(f"  codex config backup: {proxy_info['config_backup']}")
-        if proxy_info.get("service_backup"):
-            print(f"  service backup: {proxy_info['service_backup']}")
 
     if not personal_exists:
         print(f"marketplace source: {repo}; keep this repository at this path for updates")

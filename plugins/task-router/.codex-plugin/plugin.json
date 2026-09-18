@@ -1,5 +1,7 @@
 {
   "name": "task-router",
+  "license": "MIT",
+  "repository": "https://github.com/BucherFeng/task-router",
   "version": "1.0.0",
   "description": "Managed model routing from Codex conversation with background execution and durable task status",
   "author": {

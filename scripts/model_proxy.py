@@ -2,19 +2,17 @@
 """Local family-aware model proxy for Codex.
 
 Sits between Codex and the upstream API. When a model of one family (gpt/glm)
-returns a family-level failure (HTTP 429/502/503), the whole family enters a
+returns a configured family-level failure, the whole family enters a
 cooldown and the request is retried once with the other family's preferred
 model, so a quota outage of one family does not interrupt an active session.
 """
 
 import argparse
-import hashlib
 import http.client
 import json
 import os
 import signal
 import socket
-import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -130,9 +128,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         try:
             with cfg.log_lock:
+                cfg.access_log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 if cfg.access_log.exists() and cfg.access_log.stat().st_size > 10 * 1024 * 1024:
-                    cfg.access_log.with_suffix(".jsonl.old").write_text("", encoding="utf-8")
-                    cfg.access_log.write_text("", encoding="utf-8")
+                    os.replace(cfg.access_log, cfg.access_log.with_suffix(".jsonl.old"))
                 with cfg.access_log.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps(entry, ensure_ascii=True) + "\n")
         except OSError:
@@ -180,7 +178,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.rfile.readline(64)
             return bytes(body)
         length = int(self.headers.get("Content-Length", 0) or 0)
-        if length > MAX_BODY:
+        if length < 0 or length > MAX_BODY:
             raise ValueError("request body too large")
         return self.rfile.read(length) if length else b""
 
@@ -200,8 +198,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if body or method in ("POST", "PUT", "PATCH"):
             headers["Content-Length"] = str(len(body))
         conn = connector(parts.hostname, port, timeout=30)
-        conn.request(method, path, body=body if body else None, headers=headers)
-        response = conn.getresponse()
+        try:
+            conn.request(method, path, body=body if body else None, headers=headers)
+            response = conn.getresponse()
+        except BaseException:
+            conn.close()
+            raise
         if conn.sock is not None:
             conn.sock.settimeout(600)
         return conn, response
@@ -218,12 +220,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
-        self.server.headers_sent = True
+        self.headers_sent = True
         if self.command == "HEAD":
             return
         while True:
             try:
-                chunk = response.read(STREAM_CHUNK)
+                # read1 forwards currently available bytes without waiting for an 8 KiB block.
+                chunk = response.read1(STREAM_CHUNK)
             except (http.client.HTTPException, OSError) as exc:
                 # Upstream died mid-stream. Cooling the family makes Codex's own
                 # retry land on the other family instead of repeating the failure.
@@ -251,7 +254,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def handle_any(self):
-        self.server.headers_sent = False
+        self.headers_sent = False
+        conn = response = None
         cfg = self.server.cfg
         log_entry = {"ts": time.time(), "method": self.command,
                      "path": self.path.split("?")[0], "model_in": None,
@@ -259,7 +263,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                      "upstream_status": None, "result": "passthrough"}
         try:
             if self.path.split("?")[0] == "/health":
-                body = json.dumps({"status": "ok", "time": time.time()}).encode()
+                body = json.dumps({"service": "task-router-proxy", "status": "ok", "time": time.time(),
+                                   "instance_id": self.server.instance_id}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -296,7 +301,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         try:
             conn, response = self._upstream_request(self.command, self.path, attempt_body)
-            failover_note = None
+            failover_note = f"{family} unavailable -> {substitute}" if substitute else None
             if response.status == 429 and response.status not in cfg.fail_statuses:
                 log_entry["result"] = "rate_limit_passthrough"
             if response.status in cfg.fail_statuses and family:
@@ -330,14 +335,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, socket.timeout):
                 self.close_connection = True
         except (OSError, http.client.HTTPException) as exc:
-            if not self.server.headers_sent:
+            if not self.headers_sent:
                 self.send_error(502, f"proxy upstream error ({type(exc).__name__})")
         finally:
             log_entry["upstream_status"] = response.status if response is not None else None
             self._log_access(log_entry)
             try:
-                conn.close()
-            except (NameError, OSError):
+                if conn is not None:
+                    conn.close()
+            except OSError:
                 pass
 
 
@@ -348,7 +354,7 @@ class ProxyServer(ThreadingHTTPServer):
 
 def build_server(listen, upstream, glm_fallback, gpt_fallback,
                  state_file, cooldown_seconds, fail_statuses, access_log=None,
-                 stream_drop_cooldown=120, announce_rewrite=True):
+                 stream_drop_cooldown=120, announce_rewrite=True, instance_id=None):
     fail_statuses = {int(code) for code in fail_statuses}
     cfg = ProxyConfig(upstream, {"glm": glm_fallback, "gpt": gpt_fallback},
                       set(fail_statuses), cooldown_seconds, state_file, access_log,
@@ -357,6 +363,7 @@ def build_server(listen, upstream, glm_fallback, gpt_fallback,
     server = ProxyServer((host or "127.0.0.1", int(port)), ProxyHandler)
     server.cfg = cfg
     server.state = cfg.state
+    server.instance_id = instance_id
     return server
 
 
@@ -382,12 +389,13 @@ def main():
                         help="short family cooldown after an upstream stream drops mid-response")
     parser.add_argument("--no-announce-model-rewrite", action="store_true",
                         help="do not append the actual-model note when rewriting requests")
+    parser.add_argument("--instance-id", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     fail_statuses = {int(code) for code in args.fail_status.split(",")}
     server = build_server(args.listen, args.upstream, args.glm_fallback, args.gpt_fallback,
                           args.state_file, args.cooldown_seconds, fail_statuses, args.access_log,
-                          args.stream_drop_cooldown, not args.no_announce_model_rewrite)
+                          args.stream_drop_cooldown, not args.no_announce_model_rewrite, args.instance_id)
 
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()

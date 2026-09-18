@@ -62,9 +62,9 @@
       "coding-main"
     ],
     "review": [
-      "review-main",
-      "reasoning-backup",
-      "coding-main"
+      "coding-main",
+      "coding-backup",
+      "coding-fast"
     ],
     "coding": [
       "coding-main",
@@ -72,9 +72,9 @@
       "coding-fast"
     ],
     "coding-light": [
-      "coding-fast",
-      "coding-fast-backup",
-      "coding-main"
+      "coding-main",
+      "coding-backup",
+      "coding-fast"
     ]
   },
   "tasks": {

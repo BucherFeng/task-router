@@ -5,7 +5,7 @@
 ## 开发环境
 
 ```bash
-git clone https://github.com/fengbochao/task-router.git
+git clone https://github.com/BucherFeng/task-router.git
 cd task-router
 python3 -B -m unittest discover -s tests -q
 ```
@@ -13,7 +13,7 @@ python3 -B -m unittest discover -s tests -q
 要求：
 
 - Python 3.11+
-- Codex CLI（集成测试需要）
+- 自动化测试使用临时目录、模拟 Codex/systemd 命令和本地回环服务；真实部署需要 Codex CLI。
 - Linux（当前唯一已验证平台；macOS/WSL 欢迎贡献验证）
 
 ## 项目结构
@@ -58,5 +58,5 @@ test: add 429 regression
 1. 更新 `CHANGELOG.md`。
 2. 更新 `plugins/task-router/.codex-plugin/plugin.json` 的版本号。
 3. 运行全部测试。
-4. 提交并打 tag：`git tag v0.X.0 && git push --tags`。
+4. 测试通过后提交；创建对应版本的 tag 并推送指定 tag。
 5. 在 GitHub 创建 Release 并附上 CHANGELOG 对应段落。

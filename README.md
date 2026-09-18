@@ -1,10 +1,9 @@
 # task-router
 
-[![CI](https://github.com/fengbochao/task-router/actions/workflows/ci.yml/badge.svg)](https://github.com/fengbochao/task-router/actions/workflows/ci.yml)
+[![CI](https://github.com/BucherFeng/task-router/actions/workflows/ci.yml/badge.svg)](https://github.com/BucherFeng/task-router/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-114%20passing-brightgreen)](tests/)
 
-Codex 多模型任务路由与故障恢复系统。在 Codex 对话中自动按任务类型分配模型，额度耗尽时透明切换到另一类模型继续服务，上下文完整保留。
+Codex 多模型任务路由与故障恢复系统。在 Codex 对话中按任务类型分配模型，并通过本地代理在 GPT/GLM 家族之间切换，转发当前请求携带的对话内容与工具信息。
 
 ```mermaid
 flowchart LR
@@ -23,16 +22,27 @@ flowchart LR
 ### 完整安装（推荐）
 
 ```bash
-git clone https://github.com/fengbochao/task-router.git
-cd task-router && ./install.sh
+git clone https://github.com/BucherFeng/task-router.git
+cd task-router
+./install.sh
 ```
 
 完整安装包含 Codex 插件（对话工具、任务路由、后台执行）、本地模型代理（systemd 用户服务，自动故障切换）和个人配置文件。安装完成后新开一个 Codex 对话即可使用。
 
+安装器读取你已有的 Codex provider 配置，保留 API 路径和密钥环境变量引用，先启动并验证代理，再切换本地地址。请使用当前普通用户执行，确保 `systemctl --user` 可用。默认预设适用于“503 表示 GPT 或 GLM 整类额度耗尽”的 Responses API 服务。
+
+备用模型和本地端口可以在安装时指定：
+
+```bash
+./install.sh --proxy-port 8787 --glm-fallback gpt-6-astra --gpt-fallback glm-5.3
+```
+
+已有手动部署的代理时，用 `--upstream https://你的服务地址/v1` 指定原始 API 地址。升级时重新运行安装脚本，用户路由配置保持原样。完整安装会记录上游地址和配置备份位置。
+
 ### 通过 Codex 插件市场安装
 
 ```bash
-codex plugin marketplace add https://github.com/fengbochao/task-router.git
+codex plugin marketplace add https://github.com/BucherFeng/task-router.git
 codex plugin add task-router@fengbochao-plugins
 ```
 
@@ -46,8 +56,8 @@ codex plugin add task-router@fengbochao-plugins
 > 修复 src/auth.py 里的登录 bug
 > 审查一下最近的改动
 
-task-router 自动按任务类型分配模型。如果某次没有触发自动路由，加上
-"用 task-router" 前缀即可确保。
+Codex 加载 task-router 的工作流和工具后，会根据任务选择路由。也可以加上
+"用 task-router" 前缀明确指定这套工作流。
 
 或从终端运行：
 
@@ -85,11 +95,11 @@ systemctl --user status task-router-proxy
 
 本地模型代理运行在 Codex 与 API 之间：
 
-- GPT 或 GLM 任一类返回 503 时，代理自动将该类加入冷却并改写请求为另一类的首选模型，对 Codex 完全透明。
+- 对配置为家族额度信号的 HTTP 503，代理将该类加入冷却，并使用另一类的首选模型重试尚未输出的请求。
 - 429 限流透传，Codex 按内建退避机制重试。
-- 流式响应中断时，代理将该类短冷却，Codex 重试请求自动切换到另一类。
+- 检测到上游读取异常时，代理将该类短冷却，后续重试请求可选择另一类。
 - 冷却状态持久化，代理重启后保留。
-- 切换发生时在响应中携带 `X-Task-Router-Failover` 头和事实性模型身份提示。
+- 切换时添加 `X-Task-Router-Failover` 响应头并记录所选目标模型，便于确认路由。
 
 运维命令：
 
@@ -108,15 +118,15 @@ cat ~/.local/state/task-router/proxy-state.json
 | 组件 | 要求 |
 |---|---|
 | Python | 3.11+ |
-| Codex CLI | 0.154.0+ |
-| 操作系统 | Linux |
-| API | OpenAI 兼容接口，提供 GPT 和 GLM 两类模型 |
+| Codex CLI | 支持 plugin、MCP 和 app-server；本机验证版本 0.154.0 / 0.155.0 |
+| 操作系统 | Linux，已启动的 systemd 用户服务会话 |
+| API | 已配置的 Responses API provider，提供对应模型 ID 与有效凭据 |
 
 缺少 MCP SDK 时，插件自动在私有环境安装 `mcp==1.27.0`。
 
 ## 配置
 
-个人配置位于 `~/.config/task-router/routing.json`，升级时自动保留。可调整模型 ID、启用状态、推理档位、候选顺序和任务到角色的映射。修改后立即生效。
+个人配置位于 `~/.config/task-router/routing.json`，升级时自动保留。可调整模型 ID、启用状态、推理档位、候选顺序和任务到角色的映射。新提交任务读取更新后的配置；已提交任务使用保存时的策略。
 
 ## 文档
 
