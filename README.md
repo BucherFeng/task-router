@@ -7,7 +7,7 @@ Codex 多模型任务路由与故障恢复系统。在 Codex 对话中按任务�
 
 ## 安装
 
-### 完整安装（推荐）
+### 完整安装
 
 ```bash
 git clone https://github.com/BucherFeng/task-router.git
@@ -26,15 +26,6 @@ cd task-router
 ```
 
 已有手动部署的代理时，用 `--upstream https://你的服务地址/v1` 指定原始 API 地址。升级时重新运行安装脚本，用户路由配置保持原样。完整安装会记录上游地址和配置备份位置。
-
-### 通过 Codex 插件市场安装
-
-```bash
-codex plugin marketplace add https://github.com/BucherFeng/task-router.git
-codex plugin add task-router@fengbochao-plugins
-```
-
-此方式安装插件功能；模型代理需按[模型代理文档](docs/model-proxy.md)单独配置。
 
 ### 验证
 
